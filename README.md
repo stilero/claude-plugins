@@ -8,12 +8,15 @@ A curated directory of plugins for Claude Code.
 
 Plugins can be installed directly from this marketplace via Claude Code's plugin system.
 
-To install, run:
+To Add marketplace, run this command from claude:
 ```
-/plugin install {plugin-name}@stilero
+/plugin marketplace add stilero/claude-plugins
 ```
 
-or browse for the plugin in `/plugin > Discover`
+To Add a specific plugin:
+```
+/plugin install pr-comment-fixer@stilero-tools
+```
 
 ## Plugin Structure
 
