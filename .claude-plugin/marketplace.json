@@ -13,6 +13,23 @@
       "author": {
         "name": "Daniel Eliasson"
       }
-    }    
+    },
+    {
+      "name": "shopify-apps",
+      "source": "./plugins/shopify-apps",
+      "description": "A plugin to help with shopify apps",
+      "version": "1.0.0",
+      "author": {
+        "name": "Daniel Eliasson",
+        "email": "[EMAIL_ADDRESS]",
+        "url": "https://github.com/stilero"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/stilero/claude-plugins/plugins/shopify-apps",
+      "keywords": [
+        "shopify",
+        "apps"
+      ]
+    }
   ]
 }
