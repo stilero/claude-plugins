@@ -16,6 +16,7 @@ Focus exclusively on changed lines and their immediate context:
 - Missing return statements or early exits
 - Incorrect operator precedence
 - Variable shadowing that changes behavior
+- Condition ordering / missing short-circuits in state derivation — when a function checks multiple conditions to determine state (locked/unlocked, active/inactive, visible/hidden), verify that stronger constraints (e.g., "day not yet released") are checked before weaker ones (e.g., "unlock row exists"). Stale or orphaned DB rows can make a weaker check pass incorrectly if the stronger constraint isn't evaluated first. Look for existing tests or bug-fix history (grep for related test files) that document known edge cases around stale data
 
 **Edge cases**
 - Null, undefined, empty string, empty array, zero, NaN
