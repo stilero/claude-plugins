@@ -1,5 +1,5 @@
 ---
-description: "Strict hardcore code review with 7 parallel subagents (bugs, security, architecture, tests, error handling, performance, complexity)"
+description: "Strict hardcore code review with 12 parallel subagents (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety)"
 argument-hint: "[scope: uncommitted | staged | last N commits | PR number]"
 allowed-tools: ["Bash", "Glob", "Grep", "Read", "Agent", "AskUserQuestion", "EnterPlanMode"]
 ---
@@ -57,9 +57,9 @@ Before spawning subagents, quickly scan the diff to understand what's changing:
 
 This context helps you write better prompts for each subagent.
 
-## Step 3: Spawn 7 Review Subagents in Parallel
+## Step 3: Spawn 12 Review Subagents in Parallel
 
-Launch ALL 7 subagents in a SINGLE message using the Agent tool so they run in parallel. Each subagent gets the full diff (or relevant portions for very large diffs), instructions to read surrounding file context as needed, and their specialized review focus.
+Launch ALL 12 subagents in a SINGLE message using the Agent tool so they run in parallel. Each subagent gets the full diff (or relevant portions for very large diffs), instructions to read surrounding file context as needed, and their specialized review focus. For Agents 11 (Accessibility) and 12 (Type Safety), only spawn them if the diff contains relevant code (frontend/UI for accessibility, TypeScript for type safety).
 
 For very large diffs (>1000 lines), split files across subagents by relevance rather than giving every subagent the full diff.
 
@@ -110,11 +110,29 @@ Focus: Empty catch blocks, catch blocks that log but don't propagate, overly bro
 ### Agent 6: Performance Reviewer
 Focus: N+1 queries, queries inside loops, missing WHERE clauses, unbounded findMany without limit, sequential awaits that could be Promise.all(), blocking sync operations, large objects in hot paths, missing pagination, repeated expensive computations, Array.includes() in loops (use Set). Ask: "What happens at 10x current scale?"
 
+### Agent 7: Complexity Reviewer
+Focus: Unnecessary complexity, overly nested conditionals, complex ternaries, clever one-liners, functions doing too many things, copy-pasted logic, near-duplicate functions, premature abstractions for single usage, metaprogramming for straightforward operations, unreachable code, unused parameters. Ask: "Would a new team member understand this in 60 seconds?"
+
+### Agent 8: Observability Reviewer
+Focus: New operations without latency/error metrics, missing tracing spans on service or API calls, unstructured error logging, missing contextual fields in log entries (user ID, request ID), important state transitions logged at wrong level, new failure modes without health checks, changed metric names that break dashboards. Ask: "If this fails at 3 AM, how many minutes to find root cause?"
+
+### Agent 9: API Contract Reviewer
+Focus: Changed response shapes without versioning, inconsistent endpoint naming, wrong HTTP status codes (200 for created, 500 for client errors), missing request validation, accepting silently-ignored fields, breaking changes without version bump, deprecated endpoints without migration guidance. Ask: "Will any existing API consumer break?"
+
+### Agent 10: Data & Migration Reviewer
+Focus: Column drops/renames without migration strategy, NOT NULL on columns with existing NULLs, migrations that lock large tables, missing rollback migrations, schema changes that break currently-deployed code, UPDATE/DELETE without WHERE, bulk operations without batching, model changes without corresponding migrations. Ask: "Can this run on production without downtime or data loss?"
+
+### Agent 11: Accessibility Reviewer (only if diff contains frontend/UI code)
+Focus: Divs used for interactive elements instead of semantic HTML, missing ARIA attributes on custom components, click handlers on non-focusable elements, inputs without labels, images without alt text, information conveyed by color alone, dynamic content without screen reader announcements. Ask: "Can a keyboard-only or screen reader user complete this interaction?"
+
+### Agent 12: Type Safety Reviewer (only if diff contains TypeScript or typed code)
+Focus: Unsafe `as` casts, `as any` to silence errors, non-null assertions on genuinely nullable values, new `any` in signatures, API responses used without runtime validation, missing type narrowing, optional properties that are always present, index signatures bypassing type checking. Ask: "Does the type system describe what actually happens at runtime?"
+
 ## Step 4: Merge and Deduplicate
 
 Once all subagents complete:
 
-1. **Collect all issues** from all 7 subagents
+1. **Collect all issues** from all subagents
 2. **Deduplicate** — if two agents flagged the same line for the same reason, keep the more detailed one
 3. **Cross-validate** — if multiple agents flagged the same area for different reasons, note this (high-confidence problem)
 4. **Rank by severity** — BLOCKING first, then IMPORTANT, then MINOR
@@ -141,7 +159,7 @@ Only output issues. No summaries. No praise.
 
 If there are no issues at a severity level, omit that section entirely. Issue numbers are sequential across all sections — do not restart numbering per section.
 
-If zero issues across all agents: "No issues found. The diff looks clean across all 7 review angles (bugs, security, architecture, tests, error handling, performance, complexity)."
+If zero issues across all agents: "No issues found. The diff looks clean across all 12 review angles (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety)."
 
 ## Step 6: Fix Roadmap
 

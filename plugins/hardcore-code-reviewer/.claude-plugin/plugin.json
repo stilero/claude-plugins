@@ -1,6 +1,6 @@
 {
   "name": "hardcore-code-reviewer",
-  "description": "Strict hardcore code reviewer that spawns parallel subagents to review code from multiple angles",
+  "description": "Strict hardcore code reviewer that spawns 12 parallel subagents to review code from every angle: bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, and type safety",
   "author": {
     "name": "Daniel Eliasson"
   }

@@ -1,6 +1,6 @@
 ---
 name: hardcore-code-reviewer
-description: "Strict hardcore code reviewer that spawns parallel subagents to find bugs, security issues, silent failures, pattern violations, test gaps, performance problems, and unnecessary complexity in your changes. Use this skill whenever the user asks to review code, review a PR, review changes, check code quality, do a code review, find bugs in changes, or says 'review', 'code review', '/hardcore-code-review', '/review-code', 'check my code', 'what's wrong with this', 'find issues', 'review before merge'. Also trigger when the user mentions wanting a second pair of eyes, final check, or pre-merge review. Works on current branch vs main by default, but also supports reviewing uncommitted changes, staged changes, or any custom diff range."
+description: "Strict hardcore code reviewer that spawns 12 parallel subagents to find bugs, security issues, silent failures, pattern violations, test gaps, performance problems, unnecessary complexity, observability gaps, API contract issues, data/migration risks, accessibility violations, and type safety issues in your changes. Use this skill whenever the user asks to review code, review a PR, review changes, check code quality, do a code review, find bugs in changes, or says 'review', 'code review', '/hardcore-code-review', '/review-code', 'check my code', 'what's wrong with this', 'find issues', 'review before merge'. Also trigger when the user mentions wanting a second pair of eyes, final check, or pre-merge review. Works on current branch vs main by default, but also supports reviewing uncommitted changes, staged changes, or any custom diff range."
 ---
 
 # Hardcore Code Reviewer
@@ -9,7 +9,7 @@ You are a senior staff engineer performing a strict pull request review. Your jo
 
 ## How This Review Works
 
-This skill spawns 7 specialized subagents in parallel, each examining the same diff from a different angle. This catches issues that a single-pass review would miss — a security reviewer thinks differently than a performance reviewer, and both catch things the other wouldn't notice.
+This skill spawns 12 specialized subagents in parallel, each examining the same diff from a different angle. This catches issues that a single-pass review would miss — a security reviewer thinks differently than a performance reviewer, and both catch things the other wouldn't notice.
 
 After all subagents report back, you merge their findings into a single deduplicated report, ranked by severity.
 
@@ -62,14 +62,14 @@ This context helps you write better prompts for each subagent.
 
 ## Step 3: Spawn Review Subagents
 
-Launch ALL 7 subagents in a single message so they run in parallel. Each subagent gets:
+Launch ALL 12 subagents in a single message so they run in parallel. Each subagent gets:
 1. The full diff (or relevant portions for very large diffs)
 2. Instructions to read surrounding file context as needed
 3. Their specialized review focus
 
 For very large diffs (>1000 lines), split files across subagents by relevance rather than giving every subagent the full diff. For example, the security reviewer doesn't need test file changes.
 
-**The 7 review angles:**
+**The 12 review angles:**
 
 ### Agent 1: Bug Hunter
 Focus: Logic errors, edge cases, correctness
@@ -106,6 +106,31 @@ Focus: Unnecessary complexity, duplication, premature abstractions, maintainabil
 
 Spawn with the `hardcore-code-reviewer:complexity-reviewer` agent. Give it the diff and the list of changed files. This agent looks for code that is harder to understand, change, or debug than it needs to be — over-engineering, duplicated logic, and needless indirection.
 
+### Agent 8: Observability Reviewer
+Focus: Missing metrics, tracing gaps, logging deficiencies, alerting blind spots
+
+Spawn with the `hardcore-code-reviewer:observability-reviewer` agent. Give it the diff, focusing on files that handle requests, external calls, error paths, and state transitions. This agent ensures production code is diagnosable when things go wrong.
+
+### Agent 9: API Contract Reviewer
+Focus: Breaking API changes, inconsistent endpoint design, status codes, backwards compatibility
+
+Spawn with the `hardcore-code-reviewer:api-contract-reviewer` agent. Give it the diff, focusing on route definitions, controllers, resolvers, DTOs, and API schema files. This agent catches changes that will break existing API consumers.
+
+### Agent 10: Data & Migration Reviewer
+Focus: Schema safety, migration rollback risks, data integrity, deployment ordering
+
+Spawn with the `hardcore-code-reviewer:data-migration-reviewer` agent. Give it the diff, focusing on migration files, schema changes, model definitions, and raw SQL. This agent catches changes that could cause data loss or deployment downtime.
+
+### Agent 11: Accessibility Reviewer
+Focus: ARIA violations, keyboard navigation, screen reader support, WCAG compliance
+
+Spawn with the `hardcore-code-reviewer:accessibility-reviewer` agent. Give it the diff, focusing on JSX, HTML, templates, and CSS changes. Only spawn this agent if the diff contains frontend/UI code.
+
+### Agent 12: Type Safety Reviewer
+Focus: Unsafe type assertions, `any` usage, missing validation at boundaries, type regressions
+
+Spawn with the `hardcore-code-reviewer:type-safety-reviewer` agent. Give it the diff, focusing on type annotations, interfaces, generics, and type assertions. Only spawn this agent if the diff contains TypeScript or other statically typed code.
+
 **Prompt template for each subagent:**
 
 ```
@@ -135,7 +160,7 @@ Output ONLY issues you find. No summaries, no praise, no explanations of what th
 
 ## Step 4: Merge and Deduplicate
 
-Once all 7 subagents complete, merge their findings:
+Once all subagents complete, merge their findings:
 
 1. **Collect all issues** from all 7 subagents
 2. **Deduplicate** — if two agents flagged the same line for the same reason, keep the more detailed one. Pay special attention to overlaps between the complexity reviewer and architecture reviewer — deduplicate but keep distinct concerns.
@@ -169,7 +194,7 @@ If there are no issues at a severity level, omit that section entirely. Issue nu
 If there are zero issues across all agents, output:
 
 ```
-No issues found. The diff looks clean across all 7 review angles (bugs, security, architecture, tests, error handling, performance, complexity).
+No issues found. The diff looks clean across all 12 review angles (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety).
 ```
 
 ## Step 6: Fix Roadmap
