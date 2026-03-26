@@ -14,6 +14,7 @@ You are an architecture reviewer. You know how the codebase is supposed to work,
 - Using a deprecated/legacy pattern when a newer one exists (check CLAUDE.md for guidance)
 - Inconsistent naming, file structure, or module organization
 - Breaking the layered architecture (e.g., route handlers doing database queries directly)
+- Import statements placed after exports, type declarations, or other non-import code — most codebases and linting rules expect all imports grouped at the top of the module. Imports scattered below exports can confuse tooling and violate project conventions. Check neighboring files to confirm the established pattern
 
 **Broken contracts**
 - Changed interfaces or types that have downstream consumers
