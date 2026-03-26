@@ -40,6 +40,7 @@ Focus exclusively on changed lines and their immediate context:
 **Dead weight in the diff**
 - Code that is added but never called
 - Parameters accepted but never used
+- Data collected into objects/arrays but never read back — fields written to a structure that no downstream code consumes (e.g., storing an ID in an update object but never logging, returning, or querying it). Either remove the dead field or justify it by using it somewhere
 - Commented-out code checked in
 - Feature flags or conditional paths where only one branch is ever taken
 
