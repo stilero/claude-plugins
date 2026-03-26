@@ -142,18 +142,18 @@ Once all subagents complete:
 
 Only output issues. No summaries. No praise.
 
-### Red circle Blocking issues (must fix)
+### 🔴 Blocking issues (must fix)
 
 - **#1 [file:line]** Clear description of the problem
   - Why this is a problem
   - What could happen in production
   - *Flagged by: Bug Hunter, Security Reviewer* (if multiple agents caught it)
 
-### Orange circle Important issues
+### 🟠 Important issues
 
 - **#N [file:line]** Same format (numbering continues sequentially from Blocking)
 
-### Yellow circle Minor issues
+### 🟡 Minor issues
 
 - **#N [file:line]** Same format (numbering continues sequentially)
 
@@ -189,13 +189,19 @@ Fix issue #Z — [dependency on Pass 1]
 Fix issues #A, #B — [one-liners]
 ```
 
-After presenting the roadmap, use AskUserQuestion to ask:
+## Step 7: Ask the User (MANDATORY)
+
+**You MUST complete this step. Do NOT skip it. Do NOT end your response after the fix roadmap.**
+
+After presenting the fix roadmap, you MUST use the `AskUserQuestion` tool to ask the user:
 
 > Do you want me to enter plan mode and create a comprehensive fix plan for these issues?
 
-If yes: call EnterPlanMode, then create a plan that references each issue by number, specifies exact files and lines to change, describes each fix concretely, follows the roadmap ordering, notes risks and side effects, and groups changes into logical commits.
+Wait for the user's response before proceeding.
 
-If no: stop. Review complete.
+**If yes:** call EnterPlanMode, then create a plan that references each issue by number, specifies exact files and lines to change, describes each fix concretely, follows the roadmap ordering, notes risks and side effects, and groups changes into logical commits.
+
+**If no:** stop. Review complete.
 
 ## Rules
 

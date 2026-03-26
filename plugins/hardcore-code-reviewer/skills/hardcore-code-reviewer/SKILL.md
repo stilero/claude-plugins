@@ -173,18 +173,18 @@ Once all subagents complete, merge their findings:
 Present the merged results in this exact format. Only output issues. No summaries. No praise.
 
 ```
-### Red circle Blocking issues (must fix)
+### 🔴 Blocking issues (must fix)
 
 - **#1 [file:line]** Clear description of the problem
   - Why this is a problem
   - What could happen in production
   - *Flagged by: Bug Hunter, Security Reviewer* (if multiple agents caught it)
 
-### Orange circle Important issues
+### 🟠 Important issues
 
 - **#N [file:line]** Same format (numbering continues sequentially from Blocking)
 
-### Yellow circle Minor issues
+### 🟡 Minor issues
 
 - **#N [file:line]** Same format (numbering continues sequentially)
 ```
@@ -228,11 +228,15 @@ Fix issues #2, #4, #6 — [why together]
 Fix issues #7, #8 — [one-liners, safe to batch]
 ```
 
-**After presenting the fix roadmap**, ask the user:
+## Step 7: Ask the User (MANDATORY)
+
+**You MUST complete this step. Do NOT skip it. Do NOT end your response after the fix roadmap.**
+
+After presenting the fix roadmap, you MUST use the `AskUserQuestion` tool to ask the user:
 
 > Do you want me to enter plan mode and create a comprehensive fix plan for these issues?
 
-Use the AskUserQuestion tool to ask this. Wait for the user's response.
+Wait for the user's response before proceeding.
 
 **If the user says yes:**
 1. Call EnterPlanMode to switch to plan mode
