@@ -30,6 +30,12 @@ Focus exclusively on changed lines and their immediate context:
 - Assuming a specific execution order for async code
 - Assuming database constraints that don't exist in the schema
 
+**Stale references after renames**
+- Log messages, error messages, or comments that still reference old function/method/variable names after a rename
+- String literals containing old terminology when the surrounding code has been updated
+- Error messages that describe the wrong operation (e.g., "Failed to find X" when the method now finds Y)
+- Documentation strings or debug output that became misleading after a refactor
+
 **Broken contracts**
 - Function signature changes that break callers
 - Return type changes (e.g., returning null where undefined was expected)
