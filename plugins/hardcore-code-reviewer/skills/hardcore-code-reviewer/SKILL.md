@@ -84,7 +84,7 @@ Spawn with the `hardcore-code-reviewer:security-reviewer` agent. Give it the dif
 ### Agent 3: Architecture Reviewer
 Focus: Pattern violations, broken contracts, inconsistencies
 
-Spawn with the `hardcore-code-reviewer:architecture-reviewer` agent. Give it the diff and tell it which modules/features are being touched. This agent needs to read surrounding code heavily, so make sure it knows which files to explore.
+Spawn with the `hardcore-code-reviewer:architecture-reviewer` agent. Give it the diff and tell it which modules/features are being touched. This agent needs to read surrounding code heavily, so make sure it knows which files to explore. When the diff calls an API client or shared utility, tell the agent to grep for all other call sites to verify argument formatting consistency (path prefixes, option shapes, etc.).
 
 ### Agent 4: Test Coverage Reviewer
 Focus: Missing tests, broken test assumptions, untested paths
@@ -109,7 +109,7 @@ Spawn with the `hardcore-code-reviewer:complexity-reviewer` agent. Give it the d
 ### Agent 8: Observability Reviewer
 Focus: Missing metrics, tracing gaps, logging deficiencies, alerting blind spots
 
-Spawn with the `hardcore-code-reviewer:observability-reviewer` agent. Give it the diff, focusing on files that handle requests, external calls, error paths, and state transitions. This agent ensures production code is diagnosable when things go wrong.
+Spawn with the `hardcore-code-reviewer:observability-reviewer` agent. Give it the diff, focusing on files that handle requests, external calls, error paths, and state transitions. This agent ensures production code is diagnosable when things go wrong and catches per-item logging in loops that creates log volume scaling with data size.
 
 ### Agent 9: API Contract Reviewer
 Focus: Breaking API changes, inconsistent endpoint design, status codes, backwards compatibility
@@ -119,7 +119,7 @@ Spawn with the `hardcore-code-reviewer:api-contract-reviewer` agent. Give it the
 ### Agent 10: Data & Migration Reviewer
 Focus: Schema safety, migration rollback risks, data integrity, deployment ordering
 
-Spawn with the `hardcore-code-reviewer:data-migration-reviewer` agent. Give it the diff, focusing on migration files, schema changes, model definitions, and raw SQL. This agent catches changes that could cause data loss or deployment downtime.
+Spawn with the `hardcore-code-reviewer:data-migration-reviewer` agent. Give it the diff, focusing on migration files, schema changes, model definitions, and raw SQL. This agent catches changes that could cause data loss, deployment downtime, or ORM migration transaction conflicts (e.g., CONCURRENTLY inside Prisma's transactional migrate deploy).
 
 ### Agent 11: Accessibility Reviewer
 Focus: ARIA violations, keyboard navigation, screen reader support, WCAG compliance

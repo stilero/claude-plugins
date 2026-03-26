@@ -26,7 +26,7 @@ plugins/
 ## Current Plugins
 
 - **pr-comment-fixer** — Fetches and fixes unresolved GitHub PR review comments. Has a skill and a slash command.
-- **hardcore-code-reviewer** — Strict code reviewer that spawns 7 parallel subagents (bug-hunter, security-reviewer, architecture-reviewer, test-reviewer, silent-failure-hunter, performance-reviewer, complexity-reviewer). Has a skill, a command, and 7 agent definitions.
+- **hardcore-code-reviewer** — Strict code reviewer that spawns 12 parallel subagents (bug-hunter, security-reviewer, architecture-reviewer, test-reviewer, silent-failure-hunter, performance-reviewer, complexity-reviewer, observability-reviewer, api-contract-reviewer, data-migration-reviewer, accessibility-reviewer, type-safety-reviewer). Has a skill, a command, and 12 agent definitions.
 - **shopify-apps** — Guidance for Shopify app development. Has a skill with reference docs.
 
 ## Plugin Conventions
@@ -36,6 +36,10 @@ plugins/
 - Agent markdown files define subagent behavior with YAML frontmatter specifying tools, model, and description.
 - Commands are markdown files with YAML frontmatter (`description`, optional `allowed-tools`).
 - No code compilation or dependencies. All plugin logic is expressed as markdown prompts.
+
+## Version Bumps
+
+Always bump the version in `plugin.json` when modifying a plugin. Use semver: patch for fixes, minor for new features or expanded coverage, major for breaking changes.
 
 ## Adding a New Plugin
 
