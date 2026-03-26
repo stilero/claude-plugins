@@ -1,0 +1,7 @@
+{
+  "name": "hardcore-code-reviewer",
+  "description": "Strict hardcore code reviewer that spawns parallel subagents to review code from multiple angles",
+  "author": {
+    "name": "Daniel Eliasson"
+  }
+}
