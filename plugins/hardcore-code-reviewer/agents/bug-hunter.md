@@ -22,6 +22,7 @@ Focus exclusively on changed lines and their immediate context:
 - Boundary values (first item, last item, single item, max int)
 - Concurrent access to shared state
 - Async operations completing out of order
+- Header/parameter values that can be `string | string[] | undefined` — in Node.js/Express, HTTP headers can be arrays. Code that indexes into a header (e.g., `header[0]`) or passes it directly to `Buffer.from()` without checking for undefined/empty-array will crash or produce wrong results
 
 **Incorrect assumptions**
 - Assuming an array is non-empty

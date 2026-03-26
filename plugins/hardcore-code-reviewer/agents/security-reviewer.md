@@ -35,6 +35,7 @@ You are a security reviewer examining code changes for vulnerabilities. You thin
 - Type coercion issues (string "0" vs number 0)
 - Missing length/size limits (could enable DoS)
 - Regex DoS (catastrophic backtracking on user-controlled patterns)
+- HTTP header values assumed to be single strings without validating — headers can be `string | string[] | undefined` in Node.js. Security-critical headers (HMAC signatures, auth tokens, API keys) must be validated as non-empty strings before use; an empty array or undefined passed to crypto comparison or `Buffer.from()` can bypass verification or throw, turning a 403 into a 500
 
 **Cryptography**
 - Weak hashing (MD5, SHA1 for passwords)
