@@ -34,6 +34,7 @@ You are a test coverage reviewer. You find gaps between what the code does and w
 
 **Flaky test patterns**
 - Time-dependent setup across multiple calls — if a test derives dates from `now()` (e.g., `new Date()`, `Date.now()`, `startOfDay()`) in separate function calls or helpers, a date rollover between calls (midnight UTC, DST boundary) can make them disagree. All date-dependent test values should derive from a single captured timestamp or be passed in explicitly so they share the same base
+- Mixed UTC and local-time date methods — using `setUTCDate`/`getUTCDate` alongside `setDate`/`getDate` (or `setUTCHours` alongside `setHours`) in the same test introduces off-by-one flakiness around timezone offsets and DST transitions. All date arithmetic in a test must use a consistent time mode (all UTC or all local), and should prefer UTC for determinism across CI environments
 - Tests that depend on execution speed or ordering of async operations without explicit synchronization
 - Tests that depend on auto-increment IDs, random values, or insertion order without controlling for it
 

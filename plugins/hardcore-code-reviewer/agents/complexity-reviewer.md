@@ -23,6 +23,7 @@ Focus exclusively on changed lines and their immediate context:
 - Near-duplicate functions that differ by one or two parameters
 - Repeated patterns that should be a shared utility (only flag if 3+ occurrences exist)
 - Duplicated validation, transformation, or mapping logic
+- Duplicated source-of-truth definitions — new enums, constant maps, or type value sets that restate values already defined elsewhere (e.g., a Prisma enum, a shared constants file, or an existing DTO). Even two copies are dangerous: when the canonical source adds a value, the duplicate won't update automatically. Grep for the value names to check if a single source of truth already exists and should be reused or derived from
 
 **Premature or unnecessary abstraction**
 - New abstractions wrapping a single usage — added indirection with no reuse benefit
