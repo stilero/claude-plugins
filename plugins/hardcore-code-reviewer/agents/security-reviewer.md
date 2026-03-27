@@ -29,6 +29,7 @@ You are a security reviewer examining code changes for vulnerabilities. You thin
 - Error messages that leak internal details (stack traces, DB schemas)
 - Hardcoded secrets, API keys, or credentials
 - Secrets in configuration that should be environment variables
+- Logging or persisting raw/unvalidated input instead of the validated output — when a validation layer (Zod, Joi, class-validator) parses and strips unknown keys, audit logs, analytics, or debug records should capture the validated result, not the raw payload. Logging pre-validation input allows unexpected fields, oversized payloads, and data the system explicitly rejected to persist in storage, creating both a data-exposure risk and an audit-integrity gap where logs don't reflect the contract the system enforced
 
 **Input Validation**
 - Missing validation on user-controlled input
