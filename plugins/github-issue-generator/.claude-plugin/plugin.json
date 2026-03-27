@@ -1,0 +1,19 @@
+{
+  "name": "github-issue-generator",
+  "description": "Evaluates findings and ideas from conversations and creates high-value GitHub issues. Checks for duplicates before creating, and updates existing issues with new findings instead of creating redundant ones.",
+  "version": "1.1.0",
+  "author": {
+    "name": "Daniel Eliasson",
+    "email": "daniel@eliasson.tech",
+    "url": "https://github.com/stilero"
+  },
+  "license": "MIT",
+  "homepage": "https://eliasson.tech/",
+  "keywords": [
+    "github",
+    "issues",
+    "automation",
+    "productivity",
+    "tracking"
+  ]
+}
