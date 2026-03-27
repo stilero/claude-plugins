@@ -41,7 +41,7 @@ You are a test coverage reviewer. You find gaps between what the code does and w
 
 **Test quality**
 - Tests that test implementation details instead of behavior
-- Tests with misleading names that don't match what they verify
+- Tests with misleading names that don't match what they verify — in particular, test descriptions that state a different comparison operator or boundary than the code asserts (e.g., test says "enforces from < to" but the schema/code actually allows `from === to` via `<=`). Compare the operator in the test name/description against the actual assertion or production code constraint; they must agree
 - Tests with weak assertions (checking only that no error was thrown, not the result)
 - Duplicate tests that verify the same thing
 

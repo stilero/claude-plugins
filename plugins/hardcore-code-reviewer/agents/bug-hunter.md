@@ -33,11 +33,12 @@ Focus exclusively on changed lines and their immediate context:
 - Assuming a specific execution order for async code
 - Assuming database constraints that don't exist in the schema
 
-**Stale references after renames**
+**Stale references and misleading comments**
 - Log messages, error messages, or comments that still reference old function/method/variable names after a rename
 - String literals containing old terminology when the surrounding code has been updated
 - Error messages that describe the wrong operation (e.g., "Failed to find X" when the method now finds Y)
 - Documentation strings or debug output that became misleading after a refactor
+- Comments that describe a different comparison operator or boundary than the code implements — e.g., a comment saying "from < to" when the code uses `<=`, or "exclusive" when the boundary is inclusive. Compare the operator/keyword in the comment (`<`, `>`, "before", "after", "exclusive", "inclusive") against the actual operator in the code and the wording in user-facing error messages. All three (comment, code, error message) must agree
 
 **Broken contracts**
 - Function signature changes that break callers
