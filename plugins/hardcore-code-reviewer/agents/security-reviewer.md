@@ -37,6 +37,11 @@ You are a security reviewer examining code changes for vulnerabilities. You thin
 - Regex DoS (catastrophic backtracking on user-controlled patterns)
 - HTTP header values assumed to be single strings without validating — headers can be `string | string[] | undefined` in Node.js. Security-critical headers (HMAC signatures, auth tokens, API keys) must be validated as non-empty strings before use; an empty array or undefined passed to crypto comparison or `Buffer.from()` can bypass verification or throw, turning a 403 into a 500
 
+**Resource limit bypass via header trust**
+- Size/length limits enforced only via `content-length` header — if the upstream uses chunked transfer encoding or omits/forges this header, the check is bypassed entirely, allowing arbitrarily large responses/requests to be read into memory. Limits must also be enforced after reading the body (e.g., check `text.length` or byte length) or use a streaming reader that hard-caps bytes consumed regardless of headers
+- Rate limits or quotas derived from headers that the client or upstream can manipulate
+- Timeout or retry budgets based solely on response headers without server-side enforcement
+
 **Cryptography**
 - Weak hashing (MD5, SHA1 for passwords)
 - Missing salt for password hashing

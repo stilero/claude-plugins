@@ -14,6 +14,7 @@ You are a test coverage reviewer. You find gaps between what the code does and w
 - New code paths (if/else branches, switch cases) without test coverage
 - New error handling without tests that trigger those errors
 - New edge cases introduced by the change that aren't tested
+- Conditional feature mounting / graceful degradation paths — when a feature is conditionally enabled based on config (e.g., `if (config.X) { mountFeature() } else { app.all(path, 503) }`), both branches need integration tests. The "disabled" branch is especially important: test that the fallback returns the expected status code and error body when the config values are missing. Check if existing tests always mock the config as present, leaving the degradation path untested
 
 **Broken test assumptions**
 - Existing tests that now pass for the wrong reason (testing stale behavior)
