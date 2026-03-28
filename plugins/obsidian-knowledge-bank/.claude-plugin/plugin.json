@@ -1,0 +1,13 @@
+{
+  "name": "obsidian-knowledge-bank",
+  "description": "A persistent, indexed knowledge bank that stores learnings, ADR decisions, technical context, and session notes as markdown files inside your repo. Scales to thousands of files with fast grep-based index lookups. Integrates with Claude hooks for automatic session capture.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Daniel Eliasson",
+    "email": "daniel@eliasson.tech",
+    "url": "https://github.com/stilero"
+  },
+  "license": "MIT",
+  "homepage": "https://eliasson.tech/",
+  "keywords": ["knowledge", "adr", "memory", "sessions", "obsidian", "documentation", "learnings", "decisions", "context"]
+}
