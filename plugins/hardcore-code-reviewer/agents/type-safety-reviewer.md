@@ -43,6 +43,7 @@ You are a type safety reviewer. You catch places where the type system is being 
 - Index signatures (`[key: string]: any`) that bypass type checking
 - Interfaces that don't match the runtime shape of the data they describe — pay special attention to types for JSON/JSONB database columns, API responses, and deserialized data where the runtime shape may be a subset of the declared type
 - Union types that are too broad (accepting types that are never valid)
+- Optional (`?`) vs nullable (`| null`) mismatch — when a TypeScript type marks a field as optional (`field?: string`) but the corresponding API schema, Zod schema, or database column uses `nullable: true`, the runtime value will be `null`, not `undefined`. These have different semantics: `=== undefined` checks won't catch `null`, default parameter values won't trigger on `null`, and optional chaining behaves differently. Compare TS type definitions against their schema source (OpenAPI `nullable`, Zod `.nullable()` vs `.optional()`, Prisma `?` columns) and flag when they disagree
 
 **Type safety at boundaries**
 - External API responses used directly without runtime validation (Zod, io-ts, etc.)
