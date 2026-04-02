@@ -148,7 +148,55 @@ After presenting the report, offer issue creation:
 - `none` — skip issue creation
 ```
 
-When creating issues, use `gh issue create` with:
+### Duplicate Check
+
+Before creating each issue, search for existing issues that cover the same problem:
+
+```bash
+gh issue list --label "tech-debt" --state open --search "KEYWORDS" --json number,title,labels,body --limit 10
+```
+
+Use 2-3 key terms from the issue title as KEYWORDS (e.g., for "Add cursor pagination to unbounded endpoints", search "pagination unbounded endpoints").
+
+**If a similar issue exists:**
+- Do NOT create a new issue
+- Instead, add a comment to the existing issue with the new findings:
+
+```bash
+gh issue comment ISSUE_NUMBER --body "$(cat <<'EOF'
+## Additional findings from tech-debt-audit
+
+### New locations
+
+[Any file locations not already listed in the issue]
+
+### Updated impact
+
+[Any new impact information or severity changes]
+
+### Additional context
+
+[Any new details from this audit run not covered in the original issue]
+
+---
+*Updated by tech-debt-audit on YYYY-MM-DD*
+EOF
+)"
+```
+
+- If the new findings have a higher severity than the existing issue's severity label, update the label:
+
+```bash
+gh issue edit ISSUE_NUMBER --remove-label "severity:old" --add-label "severity:new"
+```
+
+- Tell the user: "Updated existing issue #N — [title]" instead of "Created issue #N"
+
+**If no similar issue exists**, create a new one:
+
+### New Issue Creation
+
+Use `gh issue create` with:
 - **Title:** imperative, actionable (e.g., "Add cursor pagination to 8 unbounded list endpoints")
 - **Body:** structured with locations, impact, and suggested approach from the report
 - **Labels:** `tech-debt` plus category label plus severity label (e.g., `tech-debt,security,severity:high` or `tech-debt,performance,severity:critical`)
