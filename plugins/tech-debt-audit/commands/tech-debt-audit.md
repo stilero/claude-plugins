@@ -151,7 +151,8 @@ After presenting the report, offer issue creation:
 When creating issues, use `gh issue create` with:
 - **Title:** imperative, actionable (e.g., "Add cursor pagination to 8 unbounded list endpoints")
 - **Body:** structured with locations, impact, and suggested approach from the report
-- **Labels:** `tech-debt` plus category label (e.g., `tech-debt,security` or `tech-debt,performance`)
+- **Labels:** `tech-debt` plus category label plus severity label (e.g., `tech-debt,security,severity:high` or `tech-debt,performance,severity:critical`)
+- **Severity label:** always include `severity:critical`, `severity:high`, `severity:medium`, or `severity:low` matching the issue's final severity (after boosting)
 
 ```bash
 gh issue create --title "Issue title" --body "$(cat <<'EOF'
@@ -174,7 +175,7 @@ gh issue create --title "Issue title" --body "$(cat <<'EOF'
 ---
 *Identified by tech-debt-audit*
 EOF
-)" --label "tech-debt,category"
+)" --label "tech-debt,category,severity:LEVEL"
 ```
 
 ## Rules

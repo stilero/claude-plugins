@@ -1,6 +1,6 @@
 {
   "name": "tech-debt-audit",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Spawns 11 parallel agents to audit a codebase for technical debt, groups findings into actionable issues, and offers GitHub issue creation",
   "author": {
     "name": "Daniel Eliasson"
