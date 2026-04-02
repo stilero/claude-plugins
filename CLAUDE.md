@@ -30,6 +30,7 @@ plugins/
 - **shopify-apps** — Guidance for Shopify app development. Has a skill with reference docs.
 - **github-issue-generator** — Evaluates conversation findings and creates/updates GitHub issues with duplicate checking.
 - **obsidian-knowledge-bank** — Persistent indexed knowledge bank for learnings, ADRs, technical context, and session notes.
+- **tech-debt-audit** — Spawns 11 parallel agents to audit a codebase for technical debt, groups findings into actionable issues, and offers GitHub issue creation.
 
 ## Plugin Conventions
 

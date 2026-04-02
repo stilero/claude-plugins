@@ -57,6 +57,15 @@
       "author": {
         "name": "Daniel Eliasson"
       }
+    },
+    {
+      "name": "tech-debt-audit",
+      "source": "./plugins/tech-debt-audit",
+      "description": "Spawns 11 parallel agents to audit a codebase for technical debt, groups findings into actionable issues, and offers GitHub issue creation",
+      "version": "1.0.0",
+      "author": {
+        "name": "Daniel Eliasson"
+      }
     }
   ]
 }
