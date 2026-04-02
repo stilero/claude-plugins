@@ -39,6 +39,24 @@
         "shopify",
         "apps"
       ]
+    },
+    {
+      "name": "github-issue-generator",
+      "source": "./plugins/github-issue-generator",
+      "description": "Evaluates findings and ideas from conversations and creates high-value GitHub issues. Checks for duplicates before creating, and updates existing issues with new findings instead of creating redundant ones.",
+      "version": "1.1.0",
+      "author": {
+        "name": "Daniel Eliasson"
+      }
+    },
+    {
+      "name": "obsidian-knowledge-bank",
+      "source": "./plugins/obsidian-knowledge-bank",
+      "description": "A persistent, indexed knowledge bank that stores learnings, ADR decisions, technical context, and session notes as markdown files inside your repo.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Daniel Eliasson"
+      }
     }
   ]
 }

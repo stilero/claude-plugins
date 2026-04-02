@@ -28,6 +28,8 @@ plugins/
 - **pr-comment-fixer** — Fetches and fixes unresolved GitHub PR review comments. Has a skill and a slash command.
 - **hardcore-code-reviewer** — Strict code reviewer that spawns 12 parallel subagents (bug-hunter, security-reviewer, architecture-reviewer, test-reviewer, silent-failure-hunter, performance-reviewer, complexity-reviewer, observability-reviewer, api-contract-reviewer, data-migration-reviewer, accessibility-reviewer, type-safety-reviewer). Has a skill, a command, and 12 agent definitions.
 - **shopify-apps** — Guidance for Shopify app development. Has a skill with reference docs.
+- **github-issue-generator** — Evaluates conversation findings and creates/updates GitHub issues with duplicate checking.
+- **obsidian-knowledge-bank** — Persistent indexed knowledge bank for learnings, ADRs, technical context, and session notes.
 
 ## Plugin Conventions
 
@@ -46,3 +48,4 @@ Always bump the version in `plugin.json` when modifying a plugin. Use semver: pa
 1. Create `plugins/<name>/.claude-plugin/plugin.json` with name, description, version, author.
 2. Add components (commands/, agents/, skills/) as needed.
 3. Each component is a standalone markdown file with YAML frontmatter.
+4. **Add the plugin to `.claude-plugin/marketplace.json`** — this is required for the plugin to appear in the marketplace. Without an entry here, the plugin exists in the repo but is invisible to users.
