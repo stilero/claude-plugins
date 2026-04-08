@@ -35,6 +35,11 @@ You are a silent failure hunter. You find places where code fails quietly instea
 - Replacing structured errors with generic strings
 - Missing error codes or identifiers for debugging
 
+**Undiscriminated child-process error swallowing**
+- `execSync`/`execFileSync`/`spawnSync` catch blocks that treat **any** thrown error as the expected "tool reported findings" case and continue parsing. Many real failures throw the same exception type: missing binary (`ENOENT`), permission denied (`EACCES`), tsconfig/resolution errors, OOM kills, timeouts, segfaults. If the catch doesn't discriminate, these failures get laundered into misleading downstream errors ("no results", "baseline out of date", "known entries no longer present") and CI never surfaces the real cause.
+- **Required pattern**: whitelist the expected exit conditions explicitly. Check `err.code === 'ENOENT'` → rethrow with a clear "tool not installed" message. Check `err.status` (exit code) against the specific non-zero values the tool uses for "findings reported" (e.g., madge=1 for cycles, eslint=1 for lint errors). For **anything else**, rethrow the original error including `stderr` so CI logs show what actually happened. Never catch-all and continue.
+- Red flag: a comment like `// tool exits non-zero when X — that's expected` followed by unconditional parsing. Expected exits must be matched by code, not by comment.
+
 **Partial child-process error capture**
 - `execSync`/`execFileSync`/`spawnSync` catch blocks that read only `err.stdout` and ignore `err.stderr`. Many CLI tools (madge, eslint, tsc, yarn, npm) write their primary output to **stderr** on non-zero exit, or split output between the two streams. If the catch parses only stdout, the parsed result is empty and downstream logic fails with a misleading error ("no results found", "obsolete entries", "unexpected empty list") that hides the real failure. Always capture both: merge `stdout + stderr`, or check stderr as a fallback when stdout is empty. Also check `err.status` / `err.signal` to distinguish "tool ran and reported issues" from "tool crashed / not installed".
 - Comments like "we still want stdout to parse the result" are a red flag — verify the tool actually writes to stdout on the error exit path, not just on success.
