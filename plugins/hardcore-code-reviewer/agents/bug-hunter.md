@@ -33,12 +33,19 @@ Focus exclusively on changed lines and their immediate context:
 - Assuming a specific execution order for async code
 - Assuming database constraints that don't exist in the schema
 
+**Module system / runtime environment assumptions**
+- Use of `__dirname`, `__filename`, `require()`, or `module.exports` in projects that may run as ESM. Check `package.json` for `"type": "module"`, presence of Vite/Vitest/Next.js/SvelteKit/`.mjs` files, or `"module": "ESNext"` in tsconfig. Under ESM these throw `ReferenceError` at module load time — the file fails to import before any code runs, which in test files means the suite reports zero failures from that file (silently invisible). Fix: derive paths from `import.meta.url` via `fileURLToPath`, or fall back to `process.cwd()`. Severity: BLOCKING when detected in an ESM project.
+- Conversely, use of `import.meta` / top-level `await` in files that are loaded as CommonJS.
+- Node-only globals (`process`, `Buffer`, `__dirname`, `fs`) in code that may run in Edge runtime, browser, Cloudflare Workers, or Deno. Check the framework's runtime config (e.g., Next.js `export const runtime = 'edge'`, middleware files).
+- **How to check**: whenever you see `__dirname`, `__filename`, `require(`, `module.exports`, or `import.meta`, grep `package.json` and tsconfig to determine the module system, then flag any mismatch as BLOCKING.
+
 **Stale references and misleading comments**
 - Log messages, error messages, or comments that still reference old function/method/variable names after a rename
 - String literals containing old terminology when the surrounding code has been updated
 - Error messages that describe the wrong operation (e.g., "Failed to find X" when the method now finds Y)
 - Documentation strings or debug output that became misleading after a refactor
 - Comments that describe a different comparison operator or boundary than the code implements — e.g., a comment saying "from < to" when the code uses `<=`, or "exclusive" when the boundary is inclusive. Compare the operator/keyword in the comment (`<`, `>`, "before", "after", "exclusive", "inclusive") against the actual operator in the code and the wording in user-facing error messages. All three (comment, code, error message) must agree
+- Docstrings/comments that describe a **data format or example shape** that disagrees with adjacent fixtures, baselines, constants, regexes, or test inputs in the same file. For example, a docstring saying `"each line looks like: a.ts > b.ts > a.ts"` (repeated start module) when the `KNOWN_CYCLES` baseline strings the code parses against use the form `a.ts > b.ts` (no repeat). When you see an example string in a comment, grep the same file for related constants/arrays/regexes and verify the shapes match character-for-character. Mismatches mislead future maintainers updating fixtures or baselines
 
 **Broken contracts**
 - Function signature changes that break callers

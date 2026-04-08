@@ -28,6 +28,10 @@ You are a test coverage reviewer. You find gaps between what the code does and w
 - Concurrent scenarios not tested (race conditions the bug hunter might find)
 - Integration boundaries not tested (does this work end-to-end?)
 
+**Module-load-time failures in test files**
+- Test files that reference CommonJS-only globals (`__dirname`, `__filename`, `require`) in an ESM project (Vitest/Vite/`"type": "module"`) will throw `ReferenceError` at import time. Critically, the runner reports **zero failures from that file** because it never loaded — the suite appears green while entire test files are silently skipped. Whenever you see these globals in a test file, verify the project's module system and flag as BLOCKING. Fix: use `fileURLToPath(import.meta.url)` or `process.cwd()`.
+- Top-level `await` or `import.meta` in a test file loaded under CommonJS has the same silent-skip failure mode.
+
 **Test infrastructure misuse**
 - Test data tracked under the wrong cleanup key — if the project uses a test data tracker, factory, or cleanup utility, verify that created records are registered under the key that cleanup actually deletes. A mismatched key means the data is never cleaned up, causing DB pollution, FK constraint failures, and flaky tests in subsequent runs
 - Setup/teardown helpers called with wrong arguments, outdated entity names, or missing required registrations

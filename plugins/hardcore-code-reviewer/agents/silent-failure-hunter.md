@@ -35,6 +35,10 @@ You are a silent failure hunter. You find places where code fails quietly instea
 - Replacing structured errors with generic strings
 - Missing error codes or identifiers for debugging
 
+**Partial child-process error capture**
+- `execSync`/`execFileSync`/`spawnSync` catch blocks that read only `err.stdout` and ignore `err.stderr`. Many CLI tools (madge, eslint, tsc, yarn, npm) write their primary output to **stderr** on non-zero exit, or split output between the two streams. If the catch parses only stdout, the parsed result is empty and downstream logic fails with a misleading error ("no results found", "obsolete entries", "unexpected empty list") that hides the real failure. Always capture both: merge `stdout + stderr`, or check stderr as a fallback when stdout is empty. Also check `err.status` / `err.signal` to distinguish "tool ran and reported issues" from "tool crashed / not installed".
+- Comments like "we still want stdout to parse the result" are a red flag — verify the tool actually writes to stdout on the error exit path, not just on success.
+
 **Retry and timeout issues**
 - Retry logic that exhausts attempts without surfacing the failure
 - Timeouts that resolve with default values instead of throwing
