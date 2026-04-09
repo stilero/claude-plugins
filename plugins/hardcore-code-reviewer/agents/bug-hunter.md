@@ -60,6 +60,12 @@ Focus exclusively on changed lines and their immediate context:
 - Stale closures capturing old values
 - Mutations to objects that are shared across scopes
 - State transitions that skip validation
+- **Early returns that skip required cleanup after a side effect already happened.** Pattern: a function calls an external operation (`updatePlan`, `save`, `upload`, `publish`), checks the return value, and `return`s on falsy/null/error — but the cleanup that pairs with the side effect (`clearCache`, `invalidateQuery`, `emitEvent`, `releaseLock`, `unlinkTempFile`) runs *after* the early return and gets skipped. Even if the return value is "false", the side effect may have partially or fully reached the backend, leaving caches/locks/events stale or orphaned. Required checks for every early return inside a function that performs a side effect:
+  1. Has the side effect already been initiated by the time we return?
+  2. Is there a paired cleanup or invalidation that must run regardless of the return value?
+  3. Does a comment nearby describe *when* cleanup should run, and does the control flow actually match that comment?
+
+  Fix patterns: move cleanup into a `finally` block (guarded by a flag set immediately after the side effect call), or call cleanup explicitly before the early return. Flag mismatches between cleanup-intent comments and actual control flow as BLOCKING.
 
 ## How To Review
 
