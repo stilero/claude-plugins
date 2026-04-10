@@ -27,6 +27,7 @@ You are an architecture reviewer. You know how the codebase is supposed to work,
 - Mixed patterns (e.g., some endpoints use validation, new one doesn't)
 - Inconsistent error handling strategies within the same module
 - Different naming conventions for the same concept
+- **Route/constant/enum names that misrepresent the operation semantics.** When a route key, action constant, or enum member uses a create-only verb (`Add`, `Create`, `Insert`) but the handler performs an upsert, update, or mixed operation — or vice versa — the name misleads future maintainers about what the endpoint does. Grep for how the constant is used (handler, tests, frontend callers) and check whether the name accurately describes the actual behavior. Common offenders: `AddX` for upsert, `DeleteX` for soft-delete/archive, `GetX` for a handler that also writes. The fix is usually renaming the constant (`UpsertPlan`, `ArchiveUser`), not changing the behavior. Flag as IMPORTANT
 - API/SDK client call patterns: path formats (leading slashes, trailing slashes, query string construction), header conventions, and argument ordering inconsistent with other call sites of the same client
 
 **Documentation-implementation drift**
