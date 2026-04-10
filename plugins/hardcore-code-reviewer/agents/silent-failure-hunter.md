@@ -21,6 +21,7 @@ You are a silent failure hunter. You find places where code fails quietly instea
 - Falling back to empty arrays/objects that hide the fact that data loading failed
 - Optional chaining (`?.`) used to silently skip operations that should never be undefined
 - Null coalescing (`??`) hiding unexpected nulls
+- **Filter-then-collapse patterns** — `.filter(isValid)` that silently drops invalid items, followed by returning `undefined`/`null`/empty when nothing survives. This turns a validation failure (malformed data that should block the operation) into a "not present" signal that callers treat as legitimate absence — e.g., saving `null` for a carousel locale, deleting a user's data, or skipping a required step. A `console.warn` alone does NOT make this safe if the calling code continues without aborting. When you see `arr.filter(predicate)` followed by `filtered.length > 0 ? filtered : undefined` (or similar empty-to-null collapse), ask: should malformed items in the original array block the operation rather than be silently removed? If the answer is yes (especially for user-submitted data on mutation paths), flag it as BLOCKING — the function should throw or return an explicit error, not return `undefined`.
 
 **Misleading success paths**
 - Functions that return successfully even when they failed to do their job
