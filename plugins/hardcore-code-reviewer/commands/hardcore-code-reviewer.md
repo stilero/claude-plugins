@@ -47,6 +47,7 @@ Run the appropriate diff command. If the diff is empty, tell the user there's no
 Also collect:
 - List of changed files: `git diff --name-only <range>`
 - Brief stats: `git diff --stat <range>`
+- **PR description (if reviewing a PR)**: `gh pr view <number-or-branch> --json title,body -q '.title + "\n\n" + .body'`. This is critical — many issues are only visible when you can cross-check claims in the PR body ("all cycles are outside features/*", "no behavior change", "only touches X") against the actual diff and constants in the code. Pass the PR title and body to every subagent so they can flag any mismatch between stated intent and actual changes. If there is no PR (uncommitted/staged review), skip this.
 
 ## Step 2: Analyze the Diff Scope
 
@@ -70,6 +71,9 @@ Review the following code changes. You are reviewing branch `<branch>` compared 
 
 ## Context
 <brief description of what the change appears to do>
+
+## PR title and description (if available)
+<PR title and body from `gh pr view`. Treat every factual/scope claim here as something you must verify against the diff and the files it touches. Mismatches between stated intent and actual changes are BLOCKING issues.>
 
 ## Changed files
 <file list>
