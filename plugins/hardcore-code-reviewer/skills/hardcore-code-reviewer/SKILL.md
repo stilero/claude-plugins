@@ -77,30 +77,42 @@ Focus: Logic errors, edge cases, correctness
 
 Spawn with the `hardcore-code-reviewer:bug-hunter` agent. Give it the full diff and the list of changed files. Tell it what the change appears to be about based on your Step 2 analysis.
 
+When building your claim checklist, prioritize claims in all six categories — this agent is the generalist verifier.
+
 ### Agent 2: Security Reviewer
 Focus: Injection, auth bypass, data exposure, secrets
 
 Spawn with the `hardcore-code-reviewer:security-reviewer` agent. Give it the diff, focusing on files that handle user input, authentication, authorization, data access, or configuration.
+
+When building your claim checklist, prioritize claims in the doc / runbook category when they assert security-relevant behavior (auth scope, permission boundaries, secret handling, workflow permissions).
 
 ### Agent 3: Architecture Reviewer
 Focus: Pattern violations, broken contracts, inconsistencies
 
 Spawn with the `hardcore-code-reviewer:architecture-reviewer` agent. Give it the diff and tell it which modules/features are being touched. This agent needs to read surrounding code heavily, so make sure it knows which files to explore. When the diff calls an API client or shared utility, tell the agent to grep for all other call sites to verify argument formatting consistency (path prefixes, option shapes, etc.).
 
+When building your claim checklist, prioritize claims in the behavioral, scope, API / contract, and doc / runbook categories.
+
 ### Agent 4: Test Coverage Reviewer
 Focus: Missing tests, broken test assumptions, untested paths
 
 Spawn with the `hardcore-code-reviewer:test-reviewer` agent. Give it the diff. This agent should check both whether new behavior has tests AND whether existing tests still validate correctness after the changes.
+
+When building your claim checklist, prioritize claims in the behavioral category — verify that tests actually exercise the behavior the PR body claims.
 
 ### Agent 5: Silent Failure Hunter
 Focus: Swallowed errors, bad fallbacks, misleading success
 
 Spawn with the `hardcore-code-reviewer:silent-failure-hunter` agent. Give it the diff, focusing on error handling paths, catch blocks, fallback logic, and any code that returns default values on failure.
 
+When building your claim checklist, prioritize claims in the idempotency / ordering / safety and behavioral categories.
+
 ### Agent 6: Performance Reviewer
 Focus: N+1 queries, unnecessary work, blocking operations
 
 Spawn with the `hardcore-code-reviewer:performance-reviewer` agent. Give it the diff, focusing on database queries, loops, async operations, and data transformations.
+
+When building your claim checklist, prioritize claims in the performance / resource category.
 
 ### Agent 7: Complexity Reviewer
 Focus: Unnecessary complexity, duplication, premature abstractions, maintainability
@@ -112,15 +124,21 @@ Focus: Missing metrics, tracing gaps, logging deficiencies, alerting blind spots
 
 Spawn with the `hardcore-code-reviewer:observability-reviewer` agent. Give it the diff, focusing on files that handle requests, external calls, error paths, and state transitions. This agent ensures production code is diagnosable when things go wrong and catches per-item logging in loops that creates log volume scaling with data size.
 
+When building your claim checklist, prioritize claims in the behavioral (log levels, emit counts, alert shapes) and performance / resource (log volume) categories.
+
 ### Agent 9: API Contract Reviewer
 Focus: Breaking API changes, inconsistent endpoint design, status codes, backwards compatibility
 
 Spawn with the `hardcore-code-reviewer:api-contract-reviewer` agent. Give it the diff, focusing on route definitions, controllers, resolvers, DTOs, and API schema files. This agent catches changes that will break existing API consumers.
 
+When building your claim checklist, prioritize claims in the API / contract category.
+
 ### Agent 10: Data & Migration Reviewer
 Focus: Schema safety, migration rollback risks, data integrity, deployment ordering
 
 Spawn with the `hardcore-code-reviewer:data-migration-reviewer` agent. Give it the diff, focusing on migration files, schema changes, model definitions, and raw SQL. This agent catches changes that could cause data loss, deployment downtime, or ORM migration transaction conflicts (e.g., CONCURRENTLY inside Prisma's transactional migrate deploy).
+
+When building your claim checklist, prioritize claims in the idempotency / ordering / safety category.
 
 ### Agent 11: Accessibility Reviewer
 Focus: ARIA violations, keyboard navigation, screen reader support, WCAG compliance
@@ -132,6 +150,8 @@ Focus: Unsafe type assertions, `any` usage, missing validation at boundaries, ty
 
 Spawn with the `hardcore-code-reviewer:type-safety-reviewer` agent. Give it the diff, focusing on type annotations, interfaces, generics, and type assertions. Only spawn this agent if the diff contains TypeScript or other statically typed code.
 
+When building your claim checklist, prioritize claims in the API / contract category that assert type-shape invariants (response type unchanged, no new `any`, narrowed unions).
+
 **Prompt template for each subagent:**
 
 ```
@@ -142,6 +162,25 @@ Review the following code changes. You are reviewing branch `<branch>` compared 
 
 ## PR title and description (if available)
 <PR title and body from `gh pr view`. Treat every factual/scope claim here as something you must verify against the diff and the files it touches. Mismatches between stated intent and actual changes are BLOCKING issues.>
+
+## Acceptance Criteria Extraction
+
+If the PR body section above is empty or absent (uncommitted/staged review), skip this step and proceed to the code review below.
+
+Otherwise, before reviewing the diff, scan the PR body (and any doc/ADR/runbook files changed in this diff) for testable claims and write them as a checklist at the top of your output. Focus your enumeration on these categories — categories are a memory jog, not a classification test; if a claim could fit two buckets, pick either:
+
+- **Behavioral** — log levels/messages, emit counts, conditional branching, alert shapes, state transitions. Example: "logs once per call", "WARN when X, INFO otherwise", "emits a single metric per request."
+- **Scope / enumeration** — "only touches X", "all Y are outside Z", "no entries under /features/*".
+- **Idempotency / ordering / safety** — "idempotent on re-run", "no writes on failure", "rollback-safe".
+- **API / contract** — "no breaking changes", "response shape unchanged", "byte-identical for non-malformed inputs".
+- **Performance / resource** — "no additional DB queries", "no increase in log volume", "O(1) lookup".
+- **Doc / runbook** — claims made in ADRs, RUNBOOKs, ARCHITECTURE.md, or README sections committed in this diff.
+
+Your `## Your task` section below names which of these categories your lane should prioritize. Extract claims in any category (cross-lane catches are valuable) but verify especially rigorously in your prioritized ones. For each claim, cite the source (PR body paragraph, or `docs/adr-003.md § Core semantics`).
+
+When you verify a claim against the code:
+- If the implementation matches, mark the item `[x]` and move on — do not emit a finding.
+- If the implementation mismatches, emit a finding in your normal output format. Severity: BLOCKING when the claim appears in release notes, changelog, or a committed doc; IMPORTANT otherwise.
 
 ## Changed files
 <file list>
@@ -166,11 +205,12 @@ Output ONLY issues you find. No summaries, no praise, no explanations of what th
 
 Once all subagents complete, merge their findings:
 
-1. **Collect all issues** from all 7 subagents
+1. **Collect all issues** from all subagents
 2. **Deduplicate** — if two agents flagged the same line for the same reason, keep the more detailed one. Pay special attention to overlaps between the complexity reviewer and architecture reviewer — deduplicate but keep distinct concerns.
 3. **Cross-validate** — if multiple agents flagged the same area for different reasons, that's a high-confidence problem. Note this in the output.
 4. **Rank by severity** — BLOCKING first, then IMPORTANT, then MINOR
 5. **Assign final severity** — an issue flagged by multiple agents gets bumped up one severity level
+6. **Acceptance-criteria sentinel** — if a PR body was fetched in Step 1 AND it exceeded ~200 chars AND was not just the empty template (`## Summary\n\n## Test plan\n` or similar) AND zero reviewer outputs contained a claim checklist (detected by grepping for `[ ]` or `[x]` at the start of bullet lines, or category labels like `Behavioral:` / `Scope:` / `API:` introducing bulleted claims), emit one synthetic IMPORTANT issue to the report: `"PR body contains substantive claims but no reviewer extracted them — the acceptance-criteria check may have been skipped. Manually re-run or verify the PR claims against the code."` This fires only on silent degradation; in the common case at least one reviewer's output contains a checklist and the sentinel stays quiet.
 
 ## Step 5: Output the Final Report
 
