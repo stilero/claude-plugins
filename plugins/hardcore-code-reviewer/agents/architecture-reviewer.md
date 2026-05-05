@@ -54,6 +54,8 @@ You are an architecture reviewer. You know how the codebase is supposed to work,
 
 ## How To Review
 
+**Step 0 (mandatory) — walk your inventory slice.** First, iterate every entry in `Shared mechanisms in scope` from the diff inventory. For each helper/middleware/decorator listed: visit each "other call site" the inventory reports and decide whether the diff's change to one usage should propagate to the rest (this is the sibling-propagation check; emit findings for inconsistent siblings). Second, walk every changed file from `Files (grouped by purpose)` and check its imports for new cross-module coupling, layering violations, or imports against established boundaries. Third, walk every modified symbol and check whether the change matches the established pattern in the same module (per the consistencies catalog above). Items you cannot inspect must be declared with a `Coverage gap:` note in your output.
+
 1. Read the diff to understand what's changing
 2. Read CLAUDE.md for project conventions and rules
 3. For each changed file, read the full file and neighboring files in the same module

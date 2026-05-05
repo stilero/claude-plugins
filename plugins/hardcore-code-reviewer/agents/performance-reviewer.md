@@ -55,6 +55,8 @@ You are a performance reviewer. You find changes that will be slow, wasteful, or
 
 ## How To Review
 
+**Step 0 (mandatory) — walk your inventory slice.** First, iterate every modified symbol from the diff inventory. For each one ask: is this in a hot path (request handler, queue consumer, render path, polled job)? Does its body contain a loop, DB query, network call, or file I/O? Apply the relevant pattern checks above. Second, grep the diff text for `for (`, `while (`, `\\.map\\(`, `\\.forEach\\(`, `\\.reduce\\(`, `await ` (especially `await` inside the loop constructs above), `findMany`, `findFirst`, `prisma\\.\\$query`, raw SQL via template literals, `fetch\\(`, `axios`, `Promise\\.all\\(` — and inspect every match for the patterns above. Third, walk every changed file containing a model/schema definition and check for missing indexes on fields used by changed queries. Items skipped must be declared with a `Coverage gap:` note.
+
 1. Read the diff and identify all data access patterns (DB queries, API calls, file I/O)
 2. For each data access, check: is it inside a loop? Could it be batched? Is it bounded?
 3. Read the Prisma schema to check for indexes on queried fields

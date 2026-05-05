@@ -60,6 +60,8 @@ You are a type safety reviewer. You catch places where the type system is being 
 
 ## How To Review
 
+**Step 0 (mandatory) — walk your inventory slice.** First, iterate every symbol (added or modified) in TypeScript / Flow / typed-language files from the diff inventory. For each, inspect declared types vs runtime behavior, generic usage, narrowing branches, and boundary types — apply the patterns above. Second, grep the diff text for ` as `, `: any`, `<any`, `!\\.`, `!,`, `!;`, `!\\)`, `as unknown`, `// @ts-ignore`, `// @ts-expect-error`, `// eslint-disable.*no-explicit-any` and inspect every match. Third, walk every changed Schemas/DTOs file and cross-check against TypeScript types that mirror it (Zod `nullable` vs TS `?`, OpenAPI `nullable` vs TS optional, etc.). Items skipped must be declared with a `Coverage gap:` note.
+
 1. Read the diff for any type annotations, interfaces, type aliases, generics, or type assertions
 2. For each `as` cast or `!` assertion, check if the assumption is actually guaranteed
 3. For each `any`, check if a proper type exists or could be created

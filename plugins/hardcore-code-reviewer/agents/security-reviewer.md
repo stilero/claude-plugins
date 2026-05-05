@@ -86,6 +86,8 @@ You are a security reviewer examining code changes for vulnerabilities. You thin
 
 ## How To Review
 
+**Step 0 (mandatory) — walk your inventory slice.** First, iterate every entry in `Trust boundaries` from the diff inventory; trace each piece of incoming data through the new code (validation? sanitization? escape? sink?) and apply the relevant pattern checks above to each one. Second, walk every Routes/controllers/handlers file and every Configs file changed in the diff. Third, walk every changed symbol whose name or body references auth/permission/token/secret/credential/cookie/session. Fourth, if any CI/build files changed, walk each `.github/workflows/*` and apply the CI/CD section above. The pattern catalog above governs *how* you inspect each item, not *which* items to inspect. Items skipped must be declared with a `Coverage gap:` note in your output.
+
 1. Read the diff and identify all points where external data enters the system
 2. Trace that data through the code — is it validated, sanitized, and escaped at every boundary?
 3. Check auth middleware on new or modified endpoints

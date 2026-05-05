@@ -61,6 +61,79 @@ Before spawning subagents, quickly scan the diff to understand what's changing:
 
 This context helps you write better prompts for each subagent.
 
+## Step 2.5: Build the Diff Inventory (mandatory)
+
+LLM-based code review is stochastic pattern-matching. Each subagent decides where to look and what to check based on token-level sampling, so different runs surface different findings — coverage drifts. The diff inventory fixes this: it is a deterministic enumeration of every reviewable item in the diff, computed by you (the orchestrator) before any subagent is spawned, and injected into every subagent's prompt. Subagents then **iterate over their assigned inventory slice first** and pattern-scan the diff second. Iteration is the floor; pattern-matching is the ceiling.
+
+Build the inventory using `git diff` plus light grep — perfect parsing is not required, 90% structural coverage is enough. If the diff is empty in a category, write `(none)` rather than omitting the section; absence is itself information.
+
+**Categories to compute:**
+
+### Files (grouped by purpose)
+Group every changed file from `git diff --name-only <range>` using path/extension heuristics:
+- **Source**: implementation code, excluding tests/configs/docs/migrations
+- **Tests**: paths containing `/test/`, `/tests/`, `/__tests__/`, `/spec/`, or files matching `*.test.*` / `*.spec.*`
+- **Routes/controllers/handlers**: paths containing `/routes/`, `/controllers/`, `/handlers/`, `/api/`, `/resolvers/`
+- **Schemas/DTOs/models**: paths containing `/schemas/`, `/dtos/`, `/models/`, files matching `*.schema.*` / `*.dto.*`
+- **Migrations**: paths containing `/migrations/`, `/migrate/`, `migrations/`, or matching migration-timestamp patterns
+- **Configs**: extensions `.yaml`/`.yml`/`.toml`/`.json`/`.env*`, files containing `.config.` or `.rc.`
+- **Build/CI**: `Dockerfile*`, `.github/workflows/`, `Makefile`, `scripts/`, `ci/`, `.gitlab-ci.*`, `.circleci/`
+- **Frontend**: extensions `.jsx`/`.tsx`/`.vue`/`.svelte`/`.html`/`.css`/`.scss`
+- **Documentation**: extensions `.md`/`.mdx`/`.rst`, `README*`, `CHANGELOG*`, `docs/`, `ADR*`, `RUNBOOK*`
+
+### Symbols touched
+For each changed file, extract identifiers introduced or modified at the function/class/type/export level. Use language-aware grep on diff lines:
+```bash
+git diff <range> | grep -nE '^[+-]\s*(export\s+)?(async\s+)?(function|class|interface|type|const|enum)\s+\w+'
+git diff <range> | grep -nE '^[+-]\s*(async\s+)?(def|class)\s+\w+'                # Python
+git diff <range> | grep -nE '^[+-]\s*(func|type)\s+\w+'                            # Go
+```
+Tag each as **added** (only in `+`), **modified** (declaration or body in both `+` and `-`), or **deleted** (only in `-`). Output `<name> (kind) — file:line`.
+
+### HTTP surface (only if route/controller/handler files are present)
+- **Routes added/modified/deleted**: extract `METHOD path` from route registrations (`app.get(...)`, `router.post(...)`, `@Get(...)`, `fastify.route(...)`, framework equivalents).
+- **Status codes appearing on `+` lines**: `git diff <range> | grep -nE '^\+.*(reply\.code|res\.status|StatusCode|HTTPException\(|throw new \w*Error.*\b(4|5)[0-9]{2}\b)'`
+- **Error handlers / interceptors changed**: `git diff <range> | grep -nE '^\+.*(setErrorHandler|formatError|onSend|errorHandler|exceptionFilter|interceptor)'`
+
+### Coverage gaps
+- **Source files changed without a corresponding test file in the same diff**: for each file under "Source," check whether any "Tests" file in the diff has a matching basename or path-stem. List the unmatched source files.
+- **New public exports without a matching test addition**: cross-reference Symbols→added (exported) with the diff text of test files. List exports that no diff'd test file mentions.
+
+### Shared mechanisms in scope
+For each helper/middleware/decorator/registrar called from any `+` line in the diff, run `grep -rnE '\b<helper>\s*\(' . --include '*.ts' --include '*.js'` (adjust extensions per project) to count call sites. List helpers with **multiple** call sites where the diff modifies usage at one site:
+- `<helperName>` — N total call sites; K in diff; other sites at: `<file:line>, <file:line>`
+
+This is the data the architecture-reviewer needs for sibling-propagation checks.
+
+### Trust boundaries (only if request handlers, deserializers, or external API calls are touched)
+List every place in the diff where data crosses a trust boundary:
+- HTTP request handlers reading `req.body` / `req.query` / `req.params` / `req.headers`
+- Deserializers (`JSON.parse`, `yaml.load`, `zod.parse` on external input)
+- External API calls (`fetch`, `axios`, SDK clients)
+- Database query construction (raw SQL, ORM raw, query builders)
+- File I/O of paths derived from input
+
+**Inventory output format:** produce a single block of plain markdown with one section per category above. Keep it under ~200 lines for typical diffs; for larger diffs, truncate per-category lists at 50 items and add `(...truncated, N more)`.
+
+**Per-agent inventory slices:** when spawning each agent in Step 3, tell it explicitly which inventory categories it owns. Suggested mapping (the orchestrator may adjust based on diff content):
+
+| Agent | Owns iteration over |
+|-------|---------------------|
+| bug-hunter | Symbols (added + modified) — every changed function gets a logic check |
+| silent-failure-hunter | Symbols (modified) + diff-grep for catch/?./??/||-fallbacks + every helper-call return-value check |
+| security-reviewer | Trust boundaries + Files (Routes, Configs) + Symbols touching auth/secret references |
+| architecture-reviewer | Shared mechanisms in scope + Files (cross-module changes) |
+| api-contract-reviewer | HTTP surface (Routes + Status codes + Error handlers) + Schemas/DTOs files |
+| test-reviewer | Coverage gaps (both subcategories) + Symbols (added) |
+| performance-reviewer | Symbols (modified) + diff-grep for loops/queries/`await`-in-loop |
+| complexity-reviewer | Symbols (added) + Files where `+`/`-` ratio is high (refactor candidates) |
+| observability-reviewer | Symbols (modified) + Error handlers + state transitions in changed code |
+| data-migration-reviewer | Files (Migrations) + Schemas/DTOs files + raw SQL in diff |
+| accessibility-reviewer | Files (Frontend) only — skip the agent entirely if this is empty |
+| type-safety-reviewer | Symbols in typed-language files + diff-grep for `as`/`any`/`!`/non-null assertions |
+
+The slice is the *minimum* coverage; agents may also pattern-scan beyond it. The contract is: every item in the slice gets at least one inspection, and any item the agent skips must be justified in its output.
+
 ## Step 3: Spawn Review Subagents
 
 Launch ALL 12 subagents in a single message so they run in parallel. Each subagent gets:
@@ -197,11 +270,23 @@ For each check that surfaces a gap, emit a finding in your normal output format.
 ## Changed files
 <file list>
 
+## Diff Inventory
+<the deterministic inventory computed in Step 2.5 — paste verbatim>
+
+## Your inventory slice
+<the categories this agent owns, copied from the per-agent slice mapping in Step 2.5>
+
 ## Diff
 <the diff content>
 
 ## Your task
 <agent-specific instructions — refer to the agent definition>
+
+**Execution order is mandatory:**
+
+1. **Iterate the inventory slice first.** Walk every item in your assigned slice above. For each item, run the lane's checks (per the agent definition). Do not skip items. If your slice contains 17 modified functions, you inspect 17 functions — not "the most interesting-looking 5."
+2. **Pattern-scan the diff second.** After the slice walk completes, scan the diff text for the lane's pattern catalog — including patterns that wouldn't be triggered by an inventory item alone (e.g., a suspicious string concat that doesn't correspond to a changed symbol).
+3. **Account for skipped items.** If you genuinely cannot inspect an inventory item (file too large, file outside the diff context, ambiguous symbol), say so explicitly in your output as a `Coverage gap:` note. Silent skipping is the failure mode this design exists to prevent.
 
 Read the full file content for any changed file where you need more context. Use Grep and Glob to understand how changed code interacts with the rest of the codebase.
 
