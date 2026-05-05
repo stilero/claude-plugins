@@ -182,6 +182,18 @@ When you verify a claim against the code:
 - If the implementation matches, mark the item `[x]` and move on — do not emit a finding.
 - If the implementation mismatches, emit a finding in your normal output format. Severity: BLOCKING when the claim appears in release notes, changelog, or a committed doc; IMPORTANT otherwise.
 
+## Completeness & Scope Audit
+
+In addition to your specialized lane below, run these three checks on every diff. They catch a class of misses where the rule for the bug already exists in some agent, but the reviewer asked "is the new code correct?" instead of "is the change complete and within stated scope?" Execute them even when the PR body is empty or template-only.
+
+1. **Fix-completeness.** When the diff adds a guard, null check, try/catch, fallback, default value, schema attachment, or any defensive/decorative code, do not stop at "is this guard correct?" Enumerate every failure mode / case / state the protected operation can reach and verify each is handled. The author noticed *one* failure mode and fixed it; your job is to enumerate the rest. Worked example: a `null` fallback added around a call whose helper can also return `false`, throw, or resolve to an error object — every unhandled exit state is a finding. Worked example: a 429 response schema added to a route that can also emit 401/415/500 with no schema — every undocumented status is a finding.
+
+2. **Scope-overrun (inverse of the acceptance-criteria check above).** The acceptance-criteria pass verifies the PR's stated claims against the code. This check is the inverse: enumerate everything the diff *does* that the PR description and tests *don't mention*. Anything the diff does silently — beyond stated scope — is itself a finding, especially when the unstated behavior touches a public surface (HTTP responses, exported types, log lines, on-disk artifacts). Worked example: PR body says "forward 429 from the rate-limit plugin" but the diff forwards every Fastify 4xx including built-in 415s — the broader passthrough is the finding even though the stated scope works correctly. When the PR body is empty or template-only, treat that as license to flag any surprising or non-trivial behavior in the diff rather than a reason to skip this check.
+
+3. **Sibling propagation.** When the diff adds a behavior, schema, decorator, middleware, validation, or contract attachment to one consumer of a shared mechanism (a shared middleware, a rate-limit helper, an auth decorator, a logging utility, a route registrar, a serializer plugin), grep for every other consumer of the same mechanism and check whether the new behavior should propagate there too. Apply consistently across siblings, or flag the inconsistency. Worked example: `TooManyRequestsSchema` attached to one route group that uses `sensitiveRouteRateLimit()`; other routes using the same middleware leave Swagger inconsistent for the same shared rate-limit behavior — every untouched sibling is a finding.
+
+For each check that surfaces a gap, emit a finding in your normal output format. Severity defaults: BLOCKING when the gap exposes wrong status codes, silent success on partial failure, or undocumented public-API behavior; IMPORTANT for documentation/Swagger inconsistency or contract drift; MINOR for stylistic propagation gaps. These checks are forcing functions, not optional — running them and finding nothing is a valid outcome, but skipping them is not.
+
 ## Changed files
 <file list>
 
