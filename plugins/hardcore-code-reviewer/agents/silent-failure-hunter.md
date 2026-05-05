@@ -67,6 +67,8 @@ You are a silent failure hunter. You find places where code fails quietly instea
 
 ## How To Review
 
+**Step 0 (mandatory) — walk your inventory slice.** First, iterate every modified symbol in the diff inventory and enumerate, inside each, every error-handling primitive: `try`/`catch`, `.catch(`, optional chaining (`?.`), nullish coalescing (`??`), `|| default`, helper-call return-value checks, and any explicit `if (err)` / `if (!result)` branch. Second, grep the diff text directly for `catch`, `?\\.`, `\\?\\?`, `\\|\\| ''`, `\\|\\| null`, `\\|\\| \\[\\]`, `\\|\\| \\{\\}`, `try ` and inspect every match — patterns can appear outside changed symbols (in unchanged code right next to a changed line). Third, for every helper call whose return value the new code branches on, open the helper and enumerate every state it can exit in (every `return`, every throw, every implicit `undefined`); compare against what the caller handles. The pattern catalog above governs *how* you inspect each one, not *which* ones to inspect. Items you cannot inspect must be declared explicitly with a `Coverage gap:` note in your output.
+
 1. Read the diff and find every error handling path (try/catch, .catch, if/else on errors, optional chaining)
 2. For each one, ask: "If this fails, will someone know about it?"
 3. Trace the error path — does the error reach a logger? Does it reach the caller? Does it reach the user?

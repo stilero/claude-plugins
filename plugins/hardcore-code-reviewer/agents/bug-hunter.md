@@ -107,6 +107,8 @@ Treat every non-trivial comment, docstring, or error message as a *spec* the cod
 
 ## How To Review
 
+**Step 0 (mandatory) — walk your inventory slice.** Iterate every function/method in `Symbols → added` and `Symbols → modified` from the diff inventory you were given. For each one: read the body in its file context, walk every conditional/loop/early-return path, and apply the pattern checks above. Do not skip a symbol because it looks routine — the routine ones are where assumptions hide. The pattern catalog above governs *how* you inspect each item, not *which* items to inspect. After the slice walk completes, then continue with the steps below. Items you cannot inspect must be declared explicitly with a `Coverage gap:` note in your output.
+
 1. Read the diff carefully, line by line
 2. For each changed file, read the full file to understand the surrounding context
 3. Use Grep to find callers of changed functions — check if the change breaks them

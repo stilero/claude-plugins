@@ -53,6 +53,8 @@ You are a test coverage reviewer. You find gaps between what the code does and w
 
 ## How To Review
 
+**Step 0 (mandatory) — walk your inventory slice.** First, iterate every entry in `Coverage gaps → Source files changed without a corresponding test file in the same diff` from the inventory; each unmatched entry is at minimum a candidate finding (severity depends on what the file does — a refactor of an unused dev script is MINOR; a behavior change in payment processing is BLOCKING). Second, iterate every entry in `Coverage gaps → New public exports without a matching test addition` — each is a candidate finding. Third, iterate every entry in `Symbols → added`; for each added function/method, grep test files for any reference to its name. If none exists across all test files, emit a finding. Fourth, walk every Tests file changed in the diff and apply the broken-assumptions / flaky-pattern / quality checks above. Items skipped must be declared with a `Coverage gap:` note.
+
 1. Read the diff to understand what behavior changed
 2. Find the test files for the changed modules (co-located `.test.ts` files or `__tests__/` directory)
 3. Read the existing tests to understand current coverage

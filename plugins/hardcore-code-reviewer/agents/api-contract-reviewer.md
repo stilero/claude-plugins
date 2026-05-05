@@ -72,6 +72,8 @@ You are an API contract reviewer. You catch changes that break API consumers, in
 
 ## How To Review
 
+**Step 0 (mandatory) — walk your inventory slice.** First, iterate every entry in `HTTP surface → Routes added/modified/deleted` from the diff inventory. For each route, inspect: handler input validation, declared response shape vs implementation, every status code the handler can emit, and every error path. Second, walk every entry in `HTTP surface → Status codes appearing on + lines` — verify each status has a documented schema attached to its routes. Third, walk every entry in `HTTP surface → Error handlers / interceptors changed` and apply the passthrough/projection-widening checks above. Fourth, walk every changed Schemas/DTOs file and check service-layer alignment. The pattern catalog above governs *how* you inspect each item; the inventory tells you *which*. Items skipped must be declared with a `Coverage gap:` note.
+
 1. Read the diff and identify every API surface change (routes, controllers, resolvers, schemas, DTOs)
 2. For each changed endpoint, grep for how it's called by other services or frontend code
 3. Check if request/response types are versioned or if changes are backwards-compatible

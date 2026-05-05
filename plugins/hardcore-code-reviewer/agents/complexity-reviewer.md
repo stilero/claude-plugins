@@ -47,6 +47,8 @@ Focus exclusively on changed lines and their immediate context:
 
 ## How To Review
 
+**Step 0 (mandatory) — walk your inventory slice.** First, iterate every added symbol from the diff inventory. For each one ask: does it have a real second caller, or is this premature abstraction wrapping a single use? Could it be expressed as 5 inline lines instead? Apply the abstraction/duplication patterns above. Second, walk every changed file where the diff adds substantially more than it deletes (a refactor / rewrite signal) and check for duplicated logic, deep nesting, or clever one-liners against the calibration thresholds below. Third, scan the diff for new constants, enums, or type-value sets and grep the codebase for duplicated source-of-truth definitions. Items skipped must be declared with a `Coverage gap:` note.
+
 1. Read the diff carefully, focusing on new code and structural changes
 2. For each changed file, read the full file to see if the change duplicates existing logic
 3. Use Grep to check if similar patterns already exist elsewhere in the codebase
