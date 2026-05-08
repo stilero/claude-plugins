@@ -1,0 +1,19 @@
+{
+  "name": "fix-pr-comments-loop",
+  "description": "Autonomous loop that fetches unresolved PR review threads, fixes them via pr-comment-fixer, hardens the diff via hardcore-code-reviewer, runs the project verification sequence, pushes, resolves threads, re-requests copilot review, and repeats until the PR is review-clean or hard caps trip.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Daniel Eliasson",
+    "email": "daniel@eliasson.tech",
+    "url": "https://github.com/stilero"
+  },
+  "license": "MIT",
+  "homepage": "https://eliasson.tech/",
+  "keywords": [
+    "pr",
+    "review",
+    "loop",
+    "automation",
+    "copilot"
+  ]
+}
