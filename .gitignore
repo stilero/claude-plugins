@@ -416,3 +416,11 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# agent-harness working artifacts (kept on disk for resume; not part of PR diffs)
+PLAN.md
+TASK.md
+.harness-state.md
+.harness-aborted.md
+.harness-grill-transcript.md
+

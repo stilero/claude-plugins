@@ -7,7 +7,7 @@ Autonomous loop that drives a pull request to a clean review state. Fetches unre
 - **Fetch unresolved threads**: Reads open `reviewThreads` for the current PR via `gh api graphql`.
 - **Fix step**: Delegates to the existing `pr-comment-fixer:fix-issues` skill — does not re-implement comment fixing.
 - **Inner hardening loop**: Delegates to `hardcore-code-reviewer:hardcore-code-reviewer` and iterates fixes until the report is clean (capped, default 3 inner iterations).
-- **Verification gating**: Runs the project's `yarn build && yarn test:unit && yarn test:integration && yarn lint` sequence before every push; failure blocks the push.
+- **Verification gating**: Resolves the host repo's verification command (env override → skill arg → `CLAUDE.md` declaration → auto-detected from `package.json`/`pyproject.toml`/`Makefile` → no-op fallback with a warning) and runs it before every push; failure blocks the push.
 - **Thread resolution**: Resolves only the threads that were actually addressed by code in the just-pushed commit, via the `resolveReviewThread` GraphQL mutation.
 - **Re-request copilot**: Calls `gh pr edit --add-reviewer @copilot` to trigger the next round of review.
 - **Bounded polling**: Polls every 60s for new copilot activity, with a per-round timeout (default 60 minutes).
@@ -41,7 +41,17 @@ You can also invoke it explicitly via the companion slash command `/fix-pr-comme
 
 ## Usage
 
-Once your PR has copilot review comments, run the slash command `/fix-pr-comments-loop` (or ask the agent to "drive this PR to a clean review"). The loop will fetch unresolved threads, dispatch the fix step to `pr-comment-fixer`, harden the diff with `hardcore-code-reviewer`, run `yarn build && yarn test:unit && yarn test:integration && yarn lint`, push, resolve only the threads it actually addressed, re-request `@copilot` review via `gh pr edit --add-reviewer @copilot`, and poll every 60s for the next round — repeating until the PR is review-clean or the configured caps (3 inner hardcore iterations, 8 outer loop rounds, 60-minute per-round poll) trip and it bails to you with a status summary.
+Once your PR has copilot review comments, run the slash command `/fix-pr-comments-loop` (or ask the agent to "drive this PR to a clean review"). The loop will fetch unresolved threads, dispatch the fix step to `pr-comment-fixer`, harden the diff with `hardcore-code-reviewer`, run the host repo's resolved verification command (see "Verification command" below), push, resolve only the threads it actually addressed, re-request `@copilot` review via `gh pr edit --add-reviewer @copilot`, and poll every 60s for the next round — repeating until the PR is review-clean or the configured caps (3 inner hardcore iterations, 2 verification retries per round, 8 outer loop rounds, 60-minute per-round poll) trip and it bails to you with a status summary.
+
+## Verification command
+
+The skill does **not** hardcode a verification command. It resolves one at runtime in this priority order:
+
+1. Environment variable `FIX_PR_COMMENTS_LOOP_VERIFY` (highest priority).
+2. A `verify=<command>` argument passed to the skill.
+3. A verification sequence declared in the host repo's `CLAUDE.md` (under headings like "Verification", "Tests", or "Build").
+4. Auto-detected from the host repo's package manifest (`package.json` + lockfile → `yarn`/`pnpm`/`npm` script chain; `pyproject.toml` → `pytest` + `ruff`; `Makefile` `test` target → `make test`).
+5. No-op fallback: if none of the above resolves a command (e.g. a markdown-only repo), the skill skips verification with a one-line warning. To enforce a verification step in such a repo, set `FIX_PR_COMMENTS_LOOP_VERIFY` to the desired command.
 
 ## Manual smoke test
 
@@ -52,7 +62,7 @@ This is a reproducible recipe for verifying the `fix-pr-comments-loop` skill end
 1. Create a throwaway branch off `main`: `git checkout -b smoke/fix-pr-comments-loop`.
 2. Commit a small diff that contains **at least two distinct defects** — one that copilot will flag, and one that `hardcore-code-reviewer` will flag. A reliable combination:
    - **Missing await** on an async call (copilot reliably flags this; e.g. `const user = fetchUser(id);` where `fetchUser` returns a Promise and the next line uses `user.name`).
-   - **Hardcoded secret** as a string literal (e.g. `const API_KEY = "sk-live-abc123def456";`). `hardcore-code-reviewer`'s security subagent will flag this as BLOCKING.
+   - **Hardcoded secret** as a string literal (e.g. `const API_KEY = "FAKE_PLACEHOLDER_REPLACE_ME";`). `hardcore-code-reviewer`'s security subagent will flag this as BLOCKING. Use an obviously-fake placeholder so GitHub's secret scanner does not trip on the demo PR.
    - Optional third defect for extra signal: an **unhandled error** path (a `JSON.parse(input)` with no `try`/`catch` inside a request handler). The `error-handling` and `silent-failure-hunter` reviewers will flag it.
 3. Push the branch and open a PR: `gh pr create --fill --draft`.
 4. Add `@copilot` as a reviewer so it produces an initial review: `gh pr edit --add-reviewer @copilot` and wait for copilot to leave at least one review comment on the diff (usually 1–3 minutes).
@@ -70,7 +80,7 @@ Watch for each of the following — all of them must be visible in the agent's t
 
 1. **Fix step runs and touches files.** The agent invokes the `pr-comment-fixer` skill (`pr-comment-fixer:fix-issues`); you should see it report which files it edited in response to the unresolved review threads.
 2. **Inner hardening loop reaches a clean report.** The agent invokes `hardcore-code-reviewer` and iterates until the final report shows **0 BLOCKING and 0 IMPORTANT** findings (the `BLOCKING` count must reach zero before the loop is allowed to push). Capped at 3 inner iterations per outer round.
-3. **Verification command exits 0.** Before pushing, the agent runs `yarn build && yarn test:unit && yarn test:integration && yarn lint`; the combined exit code must be `0`. A non-zero exit blocks the push.
+3. **Verification command exits 0.** Before pushing, the agent runs the host repo's **resolved** verification command (see "Verification command" above — env override, then `CLAUDE.md`, then auto-detect, then no-op fallback). The combined exit code must be `0`. A non-zero exit blocks the push. If the no-op fallback applies (markdown-only repo), the agent must log the `no verification command discovered` warning instead of pretending verification ran.
 4. **Push lands.** `git push` completes successfully and the new commit SHA appears on the PR.
 5. **Threads resolved via `resolveReviewThread`.** The agent issues `gh api graphql` calls invoking the `resolveReviewThread` mutation, **only for threads that were actually addressed by the just-pushed commit** (other threads stay unresolved).
 6. **Copilot re-requested.** `gh pr edit --add-reviewer @copilot` succeeds (no error from `gh`) and the PR's reviewer list shows `@copilot` re-requested.
@@ -85,7 +95,7 @@ Watch for each of the following — all of them must be visible in the agent's t
 
 - The fix step does not invoke `pr-comment-fixer` (the loop is reimplementing comment-fixing inline).
 - `hardcore-code-reviewer` final report still has `BLOCKING` or `IMPORTANT` findings when the loop pushes.
-- The loop pushes without `yarn build && yarn test:unit && yarn test:integration && yarn lint` having exited 0.
+- The loop pushes without the resolved verification command having exited 0 (or, in the documented no-op fallback case, without having logged the warning that verification was skipped).
 - A review thread is resolved that was **not** addressed by the just-pushed commit (false-positive resolution — this is a hard fail even if everything else looks green).
 - `gh pr edit --add-reviewer @copilot` is not invoked, or invoked with the wrong reviewer.
 - An outer or inner cap trips and the agent silently retries instead of bailing to the user with a status summary.

@@ -2,7 +2,7 @@
 name: fix-pr-comments-loop
 description: Run the autonomous fix-pr-comments-loop on the current branch's PR (or a specified PR) until the reviewer signs off or hard caps trip
 argument-hint: Optional Pull Request number to drive to a clean review
-allowed-tools: ["Read", "Write", "AskUserQuestion", "Task", "Grep", "TodoWrite", "Skill", "Bash"]
+allowed-tools: ["Read", "Write", "Edit", "Glob", "AskUserQuestion", "Task", "Grep", "TodoWrite", "Skill", "Bash"]
 ---
 
 # Fix PR Comments Loop
