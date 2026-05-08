@@ -74,7 +74,16 @@
       "version": "1.0.0",
       "author": {
         "name": "Daniel Eliasson"
-      }
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/stilero/claude-plugins/tree/main/plugins/fix-pr-comments-loop",
+      "keywords": [
+        "pr",
+        "review",
+        "loop",
+        "automation",
+        "copilot"
+      ]
     }
   ]
 }

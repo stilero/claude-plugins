@@ -28,6 +28,8 @@ If the user just wants a single round of fixes (no loop, no re-request), use `pr
 - The two child skills installed and triggerable: `pr-comment-fixer:fix-issues` and `hardcore-code-reviewer:hardcore-code-reviewer`.
 - A clean working tree at the start of every round (the loop will refuse to run with uncommitted changes outside of what it just produced).
 
+**Shell execution environment:** every shell pipeline in this skill (especially `gh ... | jq ...` invocations, of which there are many) should run with `set -o pipefail` so an upstream `gh` failure surfaces instead of being silently swallowed by a downstream `jq` that succeeds against empty stdin. The agent harness's bash session does NOT enable `pipefail` by default — set it explicitly at the start of any subshell or function that runs these pipelines.
+
 ## Fail-fast: no open PR
 
 Before doing anything else, confirm there is an open PR for the current branch, then capture the **current repo's** owner/name (NOT the PR's `baseRepository`) and the PR number. `gh pr view --json` does NOT accept a `baseRepository` field — valid base-repository fields are limited to `baseRefName` / `baseRefOid`. Derive owner and repo from the current repo instead.
@@ -39,13 +41,18 @@ Run these two commands:
 gh pr view --json number,state,headRefName,url
 
 # Capture OWNER/REPO from the current repo (the branch's repo).
-gh repo view --json owner,name -q '.owner.login + " " + .name'
+# Two distinct --jq passes (no whitespace-split-then-shell-parse) — repo
+# owner logins do not normally contain whitespace, but neither do they
+# normally produce well-defined splits when they do, and a whitespace-split
+# of a single concatenated string is fragile. Prefer two separate calls.
+OWNER=$(gh repo view --json owner --jq '.owner.login')
+REPO=$(gh repo view --json name --jq '.name')
 ```
 
 Parse and stash the three values for the rest of the loop:
 
-- `OWNER` — first whitespace-separated token from the `gh repo view` output (e.g. `stilero`).
-- `REPO`  — second whitespace-separated token from the `gh repo view` output (e.g. `claude-plugins`).
+- `OWNER` — captured directly via `gh repo view --json owner --jq '.owner.login'`.
+- `REPO`  — captured directly via `gh repo view --json name --jq '.name'`.
 - `PR_NUMBER` — `gh pr view --json number,state,headRefName,url --jq '.number'`.
 
 Also assert the PR is open: `gh pr view --json state --jq '.state'` must equal `OPEN`.
@@ -67,7 +74,7 @@ Do not attempt any of the rest of the loop. This is a hard precondition.
 After confirming the open PR, **also** verify the working tree is clean:
 
 ```bash
-test -z "$(git status --short)" || { echo "working tree not clean — commit, stash, or discard before running"; exit 1; }
+test -z "$(git status --short)"  # if non-empty: emit "working tree not clean — commit, stash, or discard before running" to the user and stop the loop without entering step 1. This is an agent-control bail, not a shell-process exit.
 ```
 
 This avoids mixing pre-existing local edits into a round's `FIX_FILES` snapshot diff.
@@ -85,7 +92,7 @@ Per-round derived state (`PUSHED_SHA`, `PUSH_TS`, `MERGE_BASE`, `FIX_FILES`, `IN
 If you must materialize the snapshot to disk for a downstream tool (rare), use a `mktemp`-allocated path with an `EXIT` cleanup trap:
 
 ```bash
-SNAPSHOT=$(mktemp -t fix-pr-comments-loop.XXXXXX)
+SNAPSHOT=$(mktemp "${TMPDIR:-/tmp}/fix-pr-comments-loop.XXXXXX")
 trap 'rm -f "$SNAPSHOT"' EXIT
 git status --porcelain > "$SNAPSHOT"
 ```
@@ -127,14 +134,24 @@ This skill must run the host repo's verification sequence before pushing. The ve
    - `Makefile` with a `test` target → `make test`.
    - No manifest detectable → fall through to step 5.
 
-   **Script intersection (Node.js auto-detect):** Before composing the chain, run `jq -r '.scripts | keys[]' package.json` (or use the Read tool to read `package.json` and parse the `scripts` object) and intersect the keys with `[build, test, lint]`. Compose the chain from **only the subcommands present in that intersection**, in that order — for example, if the intersection is `{build, test}` (no `lint` script), the resolved command is `<package_manager> build && <package_manager> test`, NOT a hardcoded `<package_manager> build && <package_manager> test && <package_manager> lint`. If the intersection is empty, fall through to step 5 (no-op fallback) — do not invoke `yarn`/`pnpm`/`npm` with no subcommands.
+   **Script intersection (Node.js auto-detect):** Before composing the chain, run `jq -r '.scripts | keys[]' package.json` (or use the Read tool to read `package.json` and parse the `scripts` object) and intersect the keys with `[build, test, lint]`. Compose the chain from **only the subcommands present in that intersection**, in that order. If the intersection is empty, fall through to step 5 (no-op fallback) — do not invoke `yarn`/`pnpm`/`npm` with no subcommands.
+
+   **Per-package-manager invocation form (deterministic, do not improvise):** the three package managers each have a different "exact" form for invoking a script. The auto-detect must use the form below for each manager so two agents auto-detecting against the same `package.json` produce the same command. Never write the bare `<package_manager> <script>` form (e.g. `npm build` is wrong — npm requires `npm run build`).
+   - **yarn:** `yarn <script>` for every script (e.g. `yarn build`, `yarn test`, `yarn lint`).
+   - **npm:** `npm run <script>` for `build` and `lint`; **`npm test`** (special-cased, no `run`) for `test`. Example chain: `npm run build && npm test && npm run lint`.
+   - **pnpm:** `pnpm run <script>` for every script (e.g. `pnpm run build`, `pnpm run test`, `pnpm run lint`). `pnpm <script>` also works as a shortcut, but `pnpm run <script>` is the canonical form documented in the pnpm CLI and is preferred for unambiguity.
+
+   Examples — given an intersection of `{build, test}` (no `lint` script):
+   - yarn: `yarn build && yarn test`
+   - npm: `npm run build && npm test`
+   - pnpm: `pnpm run build && pnpm run test`
 
    **Lockfile tie-breaker:** If multiple JS lockfiles are present in the same repo (e.g. both `yarn.lock` and `package-lock.json`), check `package.json` for a `packageManager` field (or `engines.packageManager`). If that field declares `yarn@...`, prefer yarn; if `pnpm@...`, prefer pnpm; if `npm@...`, prefer npm. If neither field is present and multiple lockfiles still match, fall through to step 5 (no-op fallback) with a one-line warning describing which lockfiles were detected and that no `packageManager` declaration could disambiguate them. Do not guess.
-5. **No-op fallback:** if none of the above resolves a command, set verification to a no-op (`true`) and **emit a one-line warning** in the round status: `[fix-pr-comments-loop] [round N/<outer_cap>] [step 3] no verification command discovered — skipping (set FIX_PR_COMMENTS_LOOP_VERIFY to enforce one)`.
+5. **No-op fallback (REFUSE TO PUSH):** if none of the above resolves a command, the loop **MUST refuse to push** and bail to the user with: `[fix-pr-comments-loop] [round N/<outer_cap>] [step 3] no verification target found; set FIX_PR_COMMENTS_LOOP_VERIFY or add a build/test/lint script to package.json (or equivalent) before re-running`. Verification is a hard gate — silently no-op'ing it would let the loop push unverified code, which contradicts the README's "verification is a hard gate" promise. A repo with no detectable verification target requires explicit user configuration before this skill can be used on it.
 
 The resolved command is the value used by step 3 below. **Do not hardcode any specific verification chain anywhere in this skill** — the priority above is the contract.
 
-If the host repo's `CLAUDE.md` explicitly says "no build system, no tests" (markdown-only repos, etc.), the discovery step naturally falls through to the no-op fallback in step 5 — that is the documented behavior, not a bug.
+If the host repo's `CLAUDE.md` explicitly says "no build system, no tests" (markdown-only repos, etc.), the discovery step falls through to the no-op fallback in step 5 — and at that point the loop bails to the user demanding `FIX_PR_COMMENTS_LOOP_VERIFY` or a manifest script. Markdown-only repos are not a supported host for this skill without explicit verification configuration.
 
 ## Caps and bail-outs (load-bearing safety rails)
 
@@ -148,11 +165,13 @@ These caps are NOT decorative — they exist to stop runaway loops on noisy revi
 
 Caps must be **enforced**, not just documented. Do not enter iteration 4 of the inner review — bail at the end of iteration 3 if findings remain. Do not enter round 9 of the outer loop — bail at the end of round 8 if the reviewer is still finding new issues.
 
-**On verification failure:** any non-zero exit from step 3's verification command — mechanical (typo, missing import) or structural (real broken behavior) or a pre-commit hook failure — re-enters step 2 (the inner hardcore loop). This consumes an inner-loop iteration budget rather than a separate verification-retry budget. The mechanical-vs-structural distinction was previously vibes-based and removed; the inner-iteration cap is the only cap on edit iterations within a round, and the hardcore reviewer re-vets every fix before another verification attempt. There is no longer a "verification-retries cap".
+**On verification failure:** any non-zero exit from step 3's verification command — mechanical (typo, missing import) or structural (real broken behavior) or a pre-commit hook failure — normally re-enters step 2 (the inner hardcore loop) to consume an inner-loop iteration budget so the hardcore reviewer re-vets the fix.
+
+**Flake-detection retry (separate from inner-loop cap):** before re-entering step 2, run a single mechanical retry of the verification command **without** changing any files. If the second attempt also fails AND `git diff` shows no change since the first attempt (i.e. no edits between retries), treat as a flake-OR-real-failure and bail to the user with the message `[fix-pr-comments-loop] [round N/<cap>] [step 3] verification failed twice with no diff change — flake or real failure; manual investigation required` (a "verification-fail" bail, NOT a "hardcore-reviewer cap tripped" bail — the two are reported distinctly so the user is not misrouted to the wrong artifact). The flake-retry budget is a hard cap of **2 attempts per step-3 entry** (one initial + one retry) and is independent of the inner-loop cap. Only after the diff has actually changed (i.e. the agent made an edit in step 2) does verification re-enter the inner-loop iteration budget. This replaces the previous mechanical-vs-structural distinction, which was vibes-based; the new test is purely diagnostic ("did the diff change between retries?").
 
 > **Note on polling cost:** the per-round cap of `60 minutes` × `60s` interval = up to 60 `gh` API calls per round, ≤ 480 across all 8 rounds in worst case. The interval is a simple constant; future enhancement: exponential backoff. (60s balances rate-limit budget and user-perceived responsiveness; tighter polling burns rate limit, looser polling makes rounds feel sluggish.)
 >
-> **Rate-limit back-off (process-level, shared):** On `gh api` 403 / rate-limit errors during polling or any other GraphQL call in this loop, exponentially back off (60s → 120s → 240s → bail at 480s) and retry. After the final back-off, bail to the user with the raw `gh` error and a "GitHub API rate-limit exhausted; manual follow-up required" message. This is a known failure mode on busy repos with many concurrent automated workflows. **Treat the back-off as process-level**: when one `gh api` call (e.g. polling in step 7) hits the rate limit, ALL `gh api` callers in the orchestrator (step 0 prelude pagination, step 5 mapping-rule pagination, step 5 `resolveReviewThread` mutations, step 6 reviewer-state queries, step 7 polling, step 8 follow-up review fetches) must respect the back-off window. Use a single shared back-off tracker (e.g. an in-memory deadline timestamp the agent threads through every `gh api` invocation) — do not let separate callers each independently incur the back-off.
+> **Rate-limit back-off (process-level, shared):** On `gh api` 403 / rate-limit errors during polling or any other GraphQL call in this loop, retry with exponentially-spaced waits of `60s`, then `120s`, then `240s` (three retries total — totaling roughly 7 minutes of wall-clock waiting in the worst case). On the **fourth** rate-limit hit, **bail immediately** with the raw `gh` error and a "GitHub API rate-limit exhausted; manual follow-up required" message — do NOT wait an additional 480s. (The `480s` figure that appeared in earlier drafts was an unintended cumulative-budget shorthand; it is not a fourth wait.) This is a known failure mode on busy repos with many concurrent automated workflows. **Treat the back-off as process-level**: when one `gh api` call (e.g. polling in step 7) hits the rate limit, ALL `gh api` callers in the orchestrator (step 0 prelude pagination, step 5 mapping-rule pagination, step 5 `resolveReviewThread` mutations, step 6 reviewer-state queries, step 7 polling, step 8 follow-up review fetches) must respect the back-off window. Use a single shared back-off tracker (e.g. an in-memory deadline timestamp the agent threads through every `gh api` invocation) — do not let separate callers each independently incur the back-off.
 
 ### Complexity threshold bail-outs
 
@@ -226,7 +245,7 @@ The child skill is responsible for: fetching unresolved review threads, reading 
 
 `pr-comment-fixer:fix-issues` does **not** define a structured "files I edited" return value. Do not rely on it to enumerate edited files. Instead, derive `FIX_FILES` from the working tree directly:
 
-1. **Before** invoking the child skill, snapshot the working tree state by running `git status --porcelain` and holding the result in-memory (TodoWrite or in-context). Skill state is in-memory by contract — do NOT write the snapshot to `/tmp/...` or any other on-disk path (racy across parallel runs and rarely cleaned up). If you must materialize it for a downstream tool, allocate a `mktemp -t fix-pr-comments-loop.XXXXXX` path and emit `trap 'rm -f "$SNAPSHOT"' EXIT` immediately to guarantee cleanup.
+1. **Before** invoking the child skill, snapshot the working tree state by running `git status --porcelain` and holding the result in-memory (TodoWrite or in-context). Skill state is in-memory by contract — do NOT write the snapshot to `/tmp/...` or any other on-disk path (racy across parallel runs and rarely cleaned up). If you must materialize it for a downstream tool, allocate a portable `mktemp "${TMPDIR:-/tmp}/fix-pr-comments-loop.XXXXXX"` path (positional template — BSD/macOS `mktemp -t prefix` differs from GNU `mktemp -t prefix.XXXXXX`, so avoid the `-t` form) and emit `trap 'rm -f "$SNAPSHOT"' EXIT` immediately to guarantee cleanup.
 2. **After** the child skill returns, run `git status --porcelain` again and diff against the in-memory snapshot. Any path whose status entry differs (new, modified, deleted, or appearing-only-in-the-after-snapshot) is part of `FIX_FILES`.
 3. Classify each path in `FIX_FILES` by porcelain code:
    - Added (` ?A` / `??` for untracked / `A ` for already-staged-add) and modified (` M`, `M `, `MM`) → stage with `git add -- "$path"` in step 4.
@@ -234,7 +253,11 @@ The child skill is responsible for: fetching unresolved review threads, reading 
    - Renamed (`R `) → treat both old and new path entries as part of `FIX_FILES`.
 4. Use the resulting `FIX_FILES` list as **one input** to step 4 staging — it is **combined with** `INNER_FIX_FILES` (the files edited during the hardcore-review inner loop in step 2 of this round; see step 4 for the union staging rule).
 
-Also separately record the count of distinct review threads `pr-comment-fixer` reported as addressed in this round (call this `THREADS_CLAIMED_ADDRESSED`) — used for the commit-message `X` in step 4.
+Also record `THREADS_CLAIMED_ADDRESSED` — used for the commit-message `X` in step 4. `pr-comment-fixer` does not expose a structured "threads addressed" count, so derive it from the agent's own state rather than parsing child-skill output:
+
+`THREADS_CLAIMED_ADDRESSED = (unresolved-thread count from the step-0 prelude on this round) − (a fresh post-step-1 unresolved-thread count, computed by re-running the same paginated query as step 0)`.
+
+Equivalently: `count(threads where isResolved == false at the end of step 1) − count(threads where isResolved == false at start of step 0)` (negated). Both forms are computed directly from the GraphQL response. If the post-step-1 count is greater than or equal to the prelude count (no thread changed state — `pr-comment-fixer` may have only edited code without resolving anything), `THREADS_CLAIMED_ADDRESSED = 0`.
 
 ### 2. Inner loop: run `hardcore-code-reviewer:hardcore-code-reviewer` until clean
 
@@ -264,9 +287,9 @@ Track the count of BLOCKING+IMPORTANT findings on the **first** hardcore report 
 
 ### 3. Run host-repo verification
 
-Run the verification command resolved by the discovery rules in the "Verification command discovery" section above. Concretely, this is the **resolved verification command** for the host repo — for example, `<package_manager> $(<intersection of [build, test, lint] with package.json scripts>)` for an auto-detected Node.js repo, or `pytest && ruff check .` for an auto-detected Python repo (only when `ruff` is configured per the discovery rules), or the `$FIX_PR_COMMENTS_LOOP_VERIFY` value for an explicit override, or `true` for the no-op fallback (with the documented warning logged). Do **not** copy a hardcoded chain into this step — the actual command is whatever the discovery section resolved.
+Run the verification command resolved by the discovery rules in the "Verification command discovery" section above. Concretely, this is the **resolved verification command** for the host repo — for example, the per-package-manager chain documented in the auto-detect rule (e.g. `yarn build && yarn test`, `npm run build && npm test`, or `pnpm run build && pnpm run test`) for an auto-detected Node.js repo, or `pytest && ruff check .` for an auto-detected Python repo (only when `ruff` is configured per the discovery rules), or the `$FIX_PR_COMMENTS_LOOP_VERIFY` value for an explicit override. Do **not** copy a hardcoded chain into this step — the actual command is whatever the discovery section resolved. If the no-op fallback would apply (no command resolvable), the loop has already bailed in the discovery step (see rule 5) — step 3 is never entered without a real command.
 
-If verification exits non-zero, **do not push**. The skill no longer distinguishes mechanical from structural failures (that distinction was vibes-based); on any non-zero exit, **re-enter step 2** (the inner hardcore loop) so the hardcore reviewer re-vets the fix. This consumes an inner-loop iteration budget rather than a separate verification-retry budget. There is no verification-retries cap.
+If verification exits non-zero, **do not push**. The skill no longer distinguishes mechanical from structural failures (that distinction was vibes-based). The new test is purely diagnostic: did the diff change between retries? Apply the **flake-retry** rule first (see "On verification failure" in the Caps section) — one mechanical retry, no edits between attempts; if both fail with no diff change, bail with a "verification-fail" message (NOT "hardcore-reviewer cap tripped"). Only after the diff has actually changed (i.e. the agent made an edit in step 2) does verification re-enter the inner-loop iteration budget. The flake-retry budget is small and separate (2 attempts per step-3 entry); the inner-iteration cap remains the only cap on edit iterations within a round.
 
 Once step 2 declares the inner loop clean again, re-run step 3 from the top. If the inner-iteration cap trips before verification can pass, bail to the user with the latest hardcore report AND the latest failing verification output.
 
@@ -332,21 +355,21 @@ LOCAL_SHA_BEFORE_REBASE=$(git rev-parse HEAD)
 # Fetch + rebase to detect concurrent pushes BEFORE pushing.
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git fetch origin "$BRANCH"
-git rebase "origin/$BRANCH" || {
-  echo "concurrent push detected; manual resolution required"
-  # Bail: do NOT auto-merge, do NOT --skip, do NOT --abort silently.
-  # The user must resolve the conflict, re-run the loop afterwards.
-  exit 1
-}
+git rebase "origin/$BRANCH"
+# If `git rebase` exits non-zero: the agent emits the bail message
+# "concurrent push detected; manual resolution required" to the user and stops
+# the loop without running git push. This is an agent-control bail — do NOT
+# `exit 1` from the shell, since SKILL.md runs inside the agent's bash
+# session and `exit 1` would sever it. Do NOT auto-merge, do NOT --skip,
+# do NOT --abort silently. The user must resolve the conflict and re-run.
 
 LOCAL_SHA_AFTER_REBASE=$(git rev-parse HEAD)
-if [ "$LOCAL_SHA_BEFORE_REBASE" != "$LOCAL_SHA_AFTER_REBASE" ]; then
-  # Rebase succeeded but rewrote the commit (auto-resolved hunks reordered).
-  # The mapping-rule diff in step 5 would be computed against a different
-  # commit than the one we authored — bail rather than silently mis-resolve.
-  echo "rebase rewrote commit; manual resolution required"
-  exit 1
-fi
+# If $LOCAL_SHA_BEFORE_REBASE != $LOCAL_SHA_AFTER_REBASE: the rebase succeeded
+# but rewrote the commit (auto-resolved hunks reordered). The mapping-rule
+# diff in step 5 would be computed against a different commit than the one
+# we authored — the agent emits the bail message "rebase rewrote commit;
+# manual resolution required" and stops the loop without running git push.
+# Same agent-control bail discipline as above (no shell exit).
 
 git push origin HEAD
 ```
@@ -371,7 +394,7 @@ git diff "$MERGE_BASE..$PUSHED_SHA"
 
 `BASE_BRANCH` was captured during the fail-fast step (`gh pr view --json baseRefName --jq '.baseRefName'`). If `MERGE_BASE` cannot be computed (e.g. the local clone is missing the base branch ref), bail with "could not derive merge base; ensure `origin/$BASE_BRANCH` is fetched".
 
-Next, fetch the unresolved threads with the metadata needed to apply the strict mapping rule below. **Paginate** the `reviewThreads` connection — `first:100` silently caps a noisy PR — by looping until `pageInfo.hasNextPage` is false. As with step 0, use TWO query strings (one for page 1, one for page N>1) because `gh api`'s `-F cursor=null` does NOT send GraphQL `null` (it sends the literal string `"null"`). `comments(first:0)` is a GraphQL error (minimum is `1`); use `comments(first:1) { nodes { body } }` if you need the comment body, or `comments { totalCount }` if you only need the count.
+Next, fetch the unresolved threads with the metadata needed to apply the strict mapping rule below. **Paginate** the `reviewThreads` connection — `first:100` silently caps a noisy PR — by looping until `pageInfo.hasNextPage` is false. As with step 0, use TWO query strings (one for page 1, one for page N>1) because `gh api`'s `-F cursor=null` does NOT send GraphQL `null` (it sends the literal string `"null"`). The mapping rule only consults `path` / `line` / `originalLine` / `startLine` / `originalStartLine`, so the queries do not request comment bodies — keep payloads small.
 
 **Page 1 (no cursor variable, no `after:` argument):**
 
@@ -390,7 +413,6 @@ gh api graphql -f query='
             originalLine
             startLine
             originalStartLine
-            comments(first:1) { nodes { body } }
           }
         }
       }
@@ -415,7 +437,6 @@ gh api graphql -f query='
             originalLine
             startLine
             originalStartLine
-            comments(first:1) { nodes { body } }
           }
         }
       }
@@ -462,7 +483,11 @@ Before adding the reviewer, query the existing reviewer requests to avoid relyin
 ```bash
 ALREADY_REQUESTED=$(gh pr view "$PR_NUMBER" --json reviewRequests \
   | jq --arg login "$COPILOT_REVIEWER" \
-       '[.reviewRequests[] | (.login // .name // .slug) | ascii_downcase]
+       '[.reviewRequests[]
+          # Skip Team entries — a Team named like the bot would otherwise
+          # false-positive the already-requested check.
+          | select((.__typename // "") != "Team")
+          | (.login // .name // .slug) | ascii_downcase]
         | any(. == ($login | ascii_downcase))')
 
 if [ "$ALREADY_REQUESTED" = "true" ]; then
@@ -490,14 +515,6 @@ Both conditions are required — `__typename == "Bot"` AND `contains("copilot")`
 
 **`COPILOT_LOGIN` capture (do once, reuse across rounds):** on round 1, query the existing reviews and capture the login of the first review whose author satisfies the combined filter. Stash this as `COPILOT_LOGIN`. Reuse it on subsequent rounds. If round 1 has no prior copilot review, **explicitly initialize `COPILOT_LOGIN=""`** before entering the polling loop. While `COPILOT_LOGIN` is empty, the polling filter relies entirely on the `__typename == "Bot"` AND `contains("copilot")` filter (the equality clause `author.login == $login` is dead-weight when `$login` is empty and is intentionally OR'd with the bot filter so polling still works). Once the first copilot review is observed in any round, capture its login into `COPILOT_LOGIN` and reuse on later rounds.
 
-**Same-round commit set:** before entering the polling loop, capture the list of all SHAs pushed during this loop's lifetime so far (one per completed round). Call this `KNOWN_PUSHED_SHAS`; serialize it as a JSON array in the shell variable `KNOWN_PUSHED_SHAS_JSON` for the `jq --argjson` invocation below. The current round's `$PUSHED_SHA` is the **last** entry. Use `KNOWN_PUSHED_SHAS` to reject "delayed previous-round" reviews that would otherwise sneak through a permissive timestamp filter — see the polling pseudocode below.
-
-```bash
-# Example: append the round's pushed SHA to the array as part of step 4 cleanup.
-# Hold KNOWN_PUSHED_SHAS in-memory across rounds (TodoWrite or in-context).
-KNOWN_PUSHED_SHAS_JSON=$(printf '%s\n' "${KNOWN_PUSHED_SHAS[@]}" | jq -R . | jq -s .)
-```
-
 **Polling query — fetch raw JSON, then filter via `jq --arg`:** to avoid the fragility of shell-interpolating `$COPILOT_LOGIN` and `$PUSHED_SHA` inside a single quoted `--jq` expression (escape-character drift, login values that contain shell metacharacters, etc.), fetch the raw GraphQL response **without** `--jq`, then pipe through a separate `jq --arg login "$COPILOT_LOGIN" --arg sha "$PUSHED_SHA" '<filter>'` invocation:
 
 ```bash
@@ -521,35 +538,22 @@ gh api graphql -f query='
 | jq --arg login "$COPILOT_LOGIN" \
      --arg sha "$PUSHED_SHA" \
      --arg pushTs "$PUSH_TS" \
-     --argjson knownShas "$KNOWN_PUSHED_SHAS_JSON" \
   '
-    # $knownShas is the JSON array of SHAs pushed during this loop run (incl. $sha).
     # A review is the "current round''s copilot review" iff:
     #   (1) author is the copilot bot (__typename Bot AND login contains "copilot",
     #       OR login matches the previously-captured $login when non-empty); AND
-    #   (2) EITHER commit.oid equals $sha
-    #       OR commit.oid is null/missing AND submittedAt > $pushTs AND no other
-    #          known-pushed SHA appears in the response window (defense in depth).
+    #   (2) submittedAt > $pushTs AND EITHER commit.oid equals $sha
+    #       OR commit.oid is null/missing.
     .data.repository.pullRequest.reviews.nodes
     | map(select(
         (
           (.author.__typename == "Bot" and (.author.login | ascii_downcase | contains("copilot")))
           or (.author.login == $login and $login != "")
         )
+        and (.submittedAt > $pushTs)
         and (
-          # Primary: review is anchored to exactly $sha.
           ((.commit.oid // "") == $sha)
-          or
-          # Fallback: bot reviews where commit.oid is null/missing.
-          # Accept ONLY if no other known-pushed SHA could be the anchor —
-          # i.e. $knownShas contains only $sha. This rejects "delayed
-          # previous-round review (different non-null commit.oid, later
-          # submittedAt)" which previously falsely terminated the loop.
-          (
-            (.commit.oid == null or .commit.oid == "")
-            and (.submittedAt > $pushTs)
-            and ($knownShas | map(. != $sha) | any | not)
-          )
+          or (.commit.oid == null or .commit.oid == "")
         )
       ))
     | sort_by(.submittedAt) | last
@@ -560,7 +564,9 @@ gh api graphql -f query='
 
 The shell-inline-interpolation form (`--jq "..."` with `\"$VAR\"` escapes) is intentionally removed from this skill — too fragile in practice; use the raw-fetch + `jq --arg` form above.
 
-**Why the dual criterion (`commit.oid == $sha` OR (`commit.oid == null AND submittedAt > $pushTs`)):** the OID filter is the primary signal — it precisely identifies a review attached to the just-pushed commit. The timestamp half is a fallback for review types where GitHub does not populate `commit.oid` for bots; in that case, the review's submission time after `$pushTs` plus the bot-author filter is the next-best evidence. The previous round-2 implementation OR'd the two halves loosely, which let a delayed previous-round review (different non-null `commit.oid`, later `submittedAt`) match — falsely terminating the loop. The fix above tightens the OR: a review with a populated, non-matching `commit.oid` is **rejected**, even if its `submittedAt` is after `$pushTs`. Only a review whose `commit.oid` is null AND whose timestamp is fresh AND that does not collide with another known-pushed SHA can pass the fallback path.
+**Constraint on `reviews(last:50)`:** the `last:50` cap is hardcoded above. On extremely busy PRs that accumulate more than 50 reviews per polling window (rare in practice), this can silently under-fetch a fresh copilot review. If you hit that case, paginate the `reviews` connection using the same two-query-string pattern (`reviews(first:N, after:$cursor)`) as step 0 / step 5.
+
+**Why the dual criterion (`commit.oid == $sha` OR `commit.oid == null`, both gated by `submittedAt > $pushTs`):** the OID filter is the primary signal — it precisely identifies a review attached to the just-pushed commit. The null-OID case is a fallback for review types where GitHub does not populate `commit.oid` for bots. We accept these false positives (extremely rare in practice — a delayed previous-round bot review with null `commit.oid` is almost never seen, and the `submittedAt > $pushTs` gate rejects most of them anyway) in exchange for **never falsely failing to terminate the loop**. An earlier "tightened" form of this filter rejected null-OID reviews on rounds 2+ and silently broke the multi-round case — that rejection is intentionally removed. Documented trade-off: very rare false-positive termination is preferable to a guaranteed silent failure to terminate.
 
 A round is complete when a copilot review for the just-pushed `$PUSHED_SHA` is observed (the filter above returns a non-null result). If the 60-min cap trips before that happens, bail to the user with: "copilot reviewer was silent past the 60-min cap on round N; manual follow-up required". Do not push anything else in that case.
 
@@ -613,7 +619,7 @@ On bail-out, print the cap that tripped and the artifacts the user needs to insp
 
 There is no automated unit-test harness for this skill yet — the orchestration runs against live GitHub APIs. As a partial substitute, the implementer can run these **static** checks against the SKILL.md content to catch common breakage:
 
-- **GraphQL query strings parse:** copy each `gh api graphql -f query='...'` block out of SKILL.md and pipe through a GraphQL parser (e.g. `graphql-js`'s `parse()` or `gh api graphql --dry-run` if a future `gh` version supports it). The five query strings to validate are: step 0 page-1 prelude, step 0 page-N prelude, step 5 page-1 reviewThreads, step 5 page-N reviewThreads, step 5 `resolveReviewThread` mutation, and step 7 polling. None should reference `comments(first:0)` (GraphQL minimum is `1`); none should reference `-F cursor=null` (sends literal string `"null"`); page-1 queries must omit the `$cursor` variable entirely.
+- **GraphQL query strings parse:** copy each `gh api graphql -f query='...'` block out of SKILL.md and pipe through a GraphQL parser (e.g. `graphql-js`'s `parse()` or `gh api graphql --dry-run` if a future `gh` version supports it). The six query strings to validate are: step 0 page-1 prelude, step 0 page-N prelude, step 5 page-1 reviewThreads, step 5 page-N reviewThreads, step 5 `resolveReviewThread` mutation, and step 7 polling. None should reference `comments(first:0)` (GraphQL minimum is `1`); none should reference `-F cursor=null` (sends literal string `"null"`); page-1 queries must omit the `$cursor` variable entirely.
 - **jq filter syntax:** copy each `--jq '...'` and `jq --arg ... '...'` filter out of SKILL.md and pipe through `jq -n '<filter>'` against an empty input — syntax errors will surface immediately. The polling filter (step 7) and reviewer-existence check (step 6) are the most likely to drift.
 - **gh field-name correctness:** every `gh pr view --json <fields>` and `gh repo view --json <fields>` invocation should be cross-checked against `gh pr view --help` / `gh repo view --help` for valid field names. Common drifts: `baseRepository` (NOT a `gh pr view` field), `reviewRequests.login` vs `reviewRequests.name` vs `reviewRequests.slug` (use `(.login // .name // .slug)`).
 - **No hardcoded verification chains:** `grep -E '(yarn|pnpm|npm) (build|test|lint|run) (&&|build|test|lint)' SKILL.md` should match only inside the auto-detect explanation (not as an instruction to run a literal chain). Auto-detect must compose from the script intersection rule, not a fixed string.
