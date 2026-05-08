@@ -33,7 +33,7 @@ If the user just wants a single round of fixes (no loop, no re-request), use `pr
 Before doing anything else, confirm there is an open PR for the current branch and capture the PR's owner/repo/number for later GraphQL calls:
 
 ```bash
-gh pr view --json number,state,headRefName,url,baseRepository --jq '.'
+gh pr view --json number,state,headRefName,url,baseRepository
 ```
 
 Parse the result and stash three values for the rest of the loop:
@@ -50,6 +50,14 @@ If the command fails or returns `state != "OPEN"`, **abort immediately** with a 
 
 Do not attempt any of the rest of the loop. This is a hard precondition.
 
+### Limitations: fork PRs
+
+This skill assumes the head and base of the PR are in the same repo. For fork PRs, the just-pushed SHA may not be visible to the upstream API immediately after `git push`; if you need fork-PR support, add a `gh api repos/$OWNER/$REPO/commits/$PUSHED_SHA` poll-for-existence (with a short timeout, e.g. 60s) between steps 4 and 5 before relying on the SHA in upstream GraphQL queries.
+
+### Cross-round state
+
+Skills are stateless across invocations. The executing agent must track `OWNER`, `REPO`, `PR_NUMBER`, `COPILOT_LOGIN`, and the round counter across rounds in TodoWrite or in-memory for the duration of the run. These do not persist across sessions; if the run is interrupted, the next session re-derives them by re-running the fail-fast step above and re-discovering the bot login from the next polled review (see step 7 — initialize `COPILOT_LOGIN=""` on round 1 if no prior copilot review exists).
+
 ## Verification command discovery (configurable per host repo)
 
 This skill must run the host repo's verification sequence before pushing. The verification command is **not hardcoded**. Discover it in this priority order at the start of each run, and reuse the resolved command for every round:
@@ -58,12 +66,16 @@ This skill must run the host repo's verification sequence before pushing. The ve
 2. **Skill argument:** if the caller passed a `verify=<command>` argument, use it.
 3. **Project CLAUDE.md:** read the host repo's `CLAUDE.md` (root) and search for an explicit verification sequence (look for sections titled "Verification", "Tests", "Build", or a fenced code block immediately after one of those headers). If found, use that command.
 4. **Auto-detect from package manifest:**
-   - `package.json` present with a `yarn.lock` → `yarn build && yarn test && yarn lint` (only include subcommands that are present in `scripts`; skip ones that are not defined).
+   - `package.json` present with a `yarn.lock` → `yarn build && yarn test && yarn lint` (see "Script intersection" below — only include subcommands that are defined in `scripts`).
    - `package.json` present with `pnpm-lock.yaml` → equivalent `pnpm` form.
    - `package.json` present with `package-lock.json` → equivalent `npm run` form.
    - `pyproject.toml` with `[tool.pytest.ini_options]` or `pytest.ini` → `pytest` (plus `ruff check .` if `ruff` is configured).
    - `Makefile` with a `test` target → `make test`.
    - No manifest detectable → fall through to step 5.
+
+   **Script intersection (Node.js auto-detect):** Before composing the chain, run `jq -r '.scripts | keys[]' package.json` (or use the Read tool to read `package.json` and parse the `scripts` object) and intersect the keys with `[build, test, lint]`. Compose the chain from only the subcommands present in that intersection, in that order. If the intersection is empty, fall through to step 5 (no-op fallback) — do not invoke `yarn`/`pnpm`/`npm` with no subcommands.
+
+   **Lockfile tie-breaker:** If multiple lockfiles are present in the same repo (e.g. both `yarn.lock` and `package-lock.json`), the host repo's package-manager intent is ambiguous. Fall through to step 5 (no-op fallback) with a one-line warning to the user describing which lockfiles were detected. Do not guess.
 5. **No-op fallback:** if none of the above resolves a command, set verification to a no-op (`true`) and **emit a one-line warning** in the round status: `[round N/<outer_cap>] step 3: no verification command discovered — skipping (set FIX_PR_COMMENTS_LOOP_VERIFY to enforce one)`.
 
 The resolved command is the value used by step 3 below. **Do not hardcode `yarn ...` anywhere in this skill** — the priority above is the contract.
@@ -77,13 +89,15 @@ These caps are NOT decorative — they exist to stop runaway loops on noisy revi
 | Cap | Default | Meaning | What happens at cap |
 |---|---|---|---|
 | Inner hardcore-review iterations per round | `3` | How many times the hardcore reviewer can re-run within a single round before giving up | Bail to user with the latest hardcore report and the message "hardcore-reviewer could not reach 0 BLOCKING/IMPORTANT after N inner iterations — likely the change is wrong, not the reviewer" |
-| Verification retries per round | `2` | How many times step 3's verification command can be re-attempted (after mechanical fixes) before bailing. **Independent** of the hardcore-review iteration cap. | Bail to user with the failing verification output and the message "verification failed N times this round — manual follow-up required" |
+| Verification retries per round | `2` | How many times step 3's verification command can be re-attempted (after **purely mechanical** fixes — typos in string literals, missing imports, etc.) before bailing. **Independent** of the hardcore-review iteration cap. If a verification-retry fix touches any logic-bearing code, the retry budget does NOT apply: re-enter step 2 from inner-iteration 1 of THIS round (consuming an inner-loop iteration budget) so the hardcore reviewer re-vets the change. | Bail to user with the failing verification output and the message "verification failed N times this round — manual follow-up required" |
 | Outer loop rounds | `8` | How many full fetch→fix→review→push→re-request cycles to run before giving up | Bail to user with a status summary listing per-round counts of comments addressed, hardcore findings, and copilot re-review responses |
 | Copilot poll cap (per round) | `60 minutes`, polling every `60s` | How long to wait for copilot to submit a fresh review after `--add-reviewer @copilot` | Bail to user with "copilot reviewer was silent past the 60-min cap; not pushing further". Do not push anything after the cap trips. |
 
 Caps must be **enforced**, not just documented. Do not enter iteration 4 of the inner review — bail at the end of iteration 3 if findings remain. Do not enter round 9 of the outer loop — bail at the end of round 8 if the reviewer is still finding new issues.
 
-> **Note on polling cost:** the per-round cap of `60 minutes` × `60s` interval = up to 60 `gh` API calls per round, ≤ 480 across all 8 rounds in worst case. The interval is a simple constant; future enhancement: exponential backoff.
+> **Note on polling cost:** the per-round cap of `60 minutes` × `60s` interval = up to 60 `gh` API calls per round, ≤ 480 across all 8 rounds in worst case. The interval is a simple constant; future enhancement: exponential backoff. (60s balances rate-limit budget and user-perceived responsiveness; tighter polling burns rate limit, looser polling makes rounds feel sluggish.)
+>
+> **Rate-limit back-off:** On `gh api` 403 / rate-limit errors during polling or any other GraphQL call in this loop, exponentially back off (60s → 120s → 240s → bail at 480s) and retry. After the final back-off, bail to the user with the raw `gh` error and a "GitHub API rate-limit exhausted; manual follow-up required" message. This is a known failure mode on busy repos with many concurrent automated workflows.
 
 ### Complexity threshold bail-outs
 
@@ -102,21 +116,24 @@ The order matters. Every round runs steps 1–9 unless an earlier step bails out
 
 ### 0. Per-round prelude: count unresolved threads, bail if zero
 
-Before invoking `pr-comment-fixer:fix-issues`, query the unresolved-thread count:
+Before invoking `pr-comment-fixer:fix-issues`, query the unresolved-thread count. Use the same paginated pattern as step 5 (`reviewThreads(first:100, after:$cursor)` with `pageInfo`) and aggregate across pages so a PR with more than 100 threads is not under-counted:
 
 ```bash
 gh api graphql -f query='
-  query($owner:String!,$repo:String!,$pr:Int!) {
+  query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
     repository(owner:$owner, name:$repo) {
       pullRequest(number:$pr) {
-        reviewThreads(first:100) {
+        reviewThreads(first:100, after:$cursor) {
+          pageInfo { hasNextPage endCursor }
           nodes { isResolved }
         }
       }
     }
-  }' -F owner=$OWNER -F repo=$REPO -F pr=$PR_NUMBER \
+  }' -F owner=$OWNER -F repo=$REPO -F pr=$PR_NUMBER -F cursor=$CURSOR \
   --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
 ```
+
+Sum the per-page unresolved counts to get the round's total. Drive `CURSOR` exactly as in step 5.
 
 If the count is `0`:
 
@@ -129,14 +146,19 @@ This prevents wasting a full round on an empty PR.
 
 Invoke the existing skill — do **not** re-fetch, re-parse, or re-fix manually. Pass the PR number (the stashed `$PR_NUMBER` from the fail-fast step) so the child skill knows which PR to target.
 
-The child skill is responsible for: fetching unresolved review threads, reading the affected files, and applying surgical fixes. When the child skill returns, you should have an in-progress diff staged in the working tree (uncommitted) and a list of files it edited — record this list as `FIX_FILES` for use in step 4 staging.
+The child skill is responsible for: fetching unresolved review threads, reading the affected files, and applying surgical fixes. When the child skill returns, the working tree should contain its uncommitted edits.
+
+`pr-comment-fixer:fix-issues` does **not** define a structured "files I edited" return value. Do not rely on it to enumerate edited files. Instead, derive `FIX_FILES` from the working tree directly:
+
+1. **Before** invoking the child skill, snapshot the working tree state: `git status --porcelain > /tmp/pre-fix-status.txt`.
+2. **After** the child skill returns, run `git status --porcelain` again and diff against the snapshot. Any path whose status entry differs (new, modified, or appearing-only-in-the-after-snapshot) is part of `FIX_FILES`.
+3. Use the resulting `FIX_FILES` list in step 4 staging.
+
+Also separately record the count of distinct review threads `pr-comment-fixer` reported as addressed in this round (call this `THREADS_CLAIMED_ADDRESSED`) — used for the commit-message `X` in step 4.
 
 ### 2. Inner loop: run `hardcore-code-reviewer:hardcore-code-reviewer` until clean
 
-Run the hardcore reviewer with a **scope that depends on the round**:
-
-- **Round 1:** scope = uncommitted changes (the fixes from step 1 are not yet committed).
-- **Rounds 2..N:** scope = `HEAD~1..HEAD` (the just-pushed commit from the previous round may have rolled in already; on the current round, uncommitted changes from this round's step 1 are still in the working tree, so the scope is still uncommitted changes — but be explicit when invoking).
+On every round (round 1 and rounds 2..N alike), the scope passed to the hardcore reviewer is the **uncommitted working-tree diff produced by step 1 of THIS round**. There is no per-round variation — committed previous-round work is not re-reviewed; only the current round's not-yet-committed fixes are in scope.
 
 Concretely, on each round, after step 1 completes, invoke:
 
@@ -150,7 +172,7 @@ If the report has any `BLOCKING` or `IMPORTANT` findings, fix them in-place and 
 - Iteration 2: same.
 - Iteration 3 (final): same. If the report is still not clean after iteration 3, **bail to the user** (do not push). The cap exists because if hardcore-reviewer cannot reach 0 BLOCKING/IMPORTANT after 3 passes, the underlying change is probably wrong — not the reviewer. Hand control back with the latest report.
 
-`NIT`-level findings do not block the loop — record them but do not iterate further on them.
+`MINOR`-level findings do not block the loop — record them but do not iterate further on them.
 
 Track the count of BLOCKING+IMPORTANT findings on the **first** hardcore report of this round versus the **final** report — the difference is the `Y` value used in the round-summary commit message in step 4.
 
@@ -197,6 +219,14 @@ git add -- "<file1>" "<file2>" ...   # one path per item, no globs
 
 After staging, **gate** with `git status --short` and verify only the expected paths are staged. If anything unexpected appears (untracked secrets, unrelated edits), **bail to the user** with the unexpected entries listed — do not push.
 
+**Recovery when this gate fails.** The skill will NOT silently include or exclude unexpected entries. The user has three explicit options to make progress on the next run:
+
+- (a) Add the unexpected entries to `.gitignore` and re-run, if they are local artifacts that should never be committed.
+- (b) `git stash -u` them and re-run, if they are unrelated work-in-progress that the user wants to preserve but exclude from this PR.
+- (c) `git rm --cached <path>` them (then commit that as a separate hygiene change) if they were accidentally tracked at some prior point and should leave the tree.
+
+Pick exactly one. The skill does not have enough context to decide which is right.
+
 Auto-generate the round commit message. The message is **deterministic**:
 
 ```text
@@ -206,15 +236,28 @@ Round N: address copilot feedback (X comments) + hardcore-review fixes (Y findin
 Where:
 
 - `N` = the current round number (1-based).
-- `X` = the count of unresolved threads addressed in this round, defined as the number of distinct review threads for which a `resolveReviewThread` mutation was issued in step 5 of this round (computed at end of step 5 — for the commit message in step 4, use the count of threads that pr-comment-fixer reported as addressed in step 1).
+- `X` = `THREADS_CLAIMED_ADDRESSED` — the count of distinct review threads `pr-comment-fixer:fix-issues` reported as addressed in step 1 of THIS round. This is the value committed in the message; the authoritative resolution count from step 5 may differ slightly (the strict mapping rule may resolve fewer or, in rare cases, more) and is reported separately in the round status output, not in the commit subject.
 - `Y` = the count of `BLOCKING + IMPORTANT` findings the inner hardcore-review loop fixed this round, defined as `(BLOCKING+IMPORTANT count on iteration 1's first report) - (BLOCKING+IMPORTANT count on the final iteration's report)`. If the inner loop ran only 1 iteration (clean on first pass), `Y = 0`.
 
-Commit and push:
+Commit and push. Before pushing, fetch + rebase to avoid a silent race with concurrent pushes (other automation, or the user pushing manually from another terminal):
 
 ```bash
 git commit -m "<deterministic round summary computed above>"
+
+# Fetch + rebase to detect concurrent pushes BEFORE pushing.
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+git fetch origin "$BRANCH"
+git rebase "origin/$BRANCH" || {
+  echo "concurrent push detected; manual resolution required"
+  # Bail: do NOT auto-merge, do NOT --skip, do NOT --abort silently.
+  # The user must resolve the conflict, re-run the loop afterwards.
+  exit 1
+}
+
 git push origin HEAD
 ```
+
+If the `rebase` step exits non-zero (real conflict between concurrent pushes), bail to the user with a "concurrent push detected; manual resolution required" message and do not auto-merge, do not force-push, do not `--skip` rebase commits. Hand control back so the user can resolve the conflict before re-running the loop.
 
 Capture the SHA of the just-pushed commit (`PUSHED_SHA`) and the timestamp of the push (`PUSH_TS`) — both are needed for step 5 (mapping rule) and step 7 (review-attached-to-commit filter).
 
@@ -222,14 +265,15 @@ Capture the SHA of the just-pushed commit (`PUSHED_SHA`) and the timestamp of th
 
 For each unresolved review thread that was addressed by code changes in the just-pushed commit, resolve it via the GraphQL `resolveReviewThread` mutation.
 
-First, fetch the unresolved threads with the metadata needed to apply the strict mapping rule below:
+First, fetch the unresolved threads with the metadata needed to apply the strict mapping rule below. **Paginate** the `reviewThreads` connection — `first:100` silently caps a noisy PR — by looping with `after: $cursor` until `pageInfo.hasNextPage` is false. The query template:
 
 ```bash
 gh api graphql -f query='
-  query($owner:String!,$repo:String!,$pr:Int!) {
+  query($owner:String!,$repo:String!,$pr:Int!,$cursor:String) {
     repository(owner:$owner, name:$repo) {
       pullRequest(number:$pr) {
-        reviewThreads(first:100) {
+        reviewThreads(first:100, after:$cursor) {
+          pageInfo { hasNextPage endCursor }
           nodes {
             id
             isResolved
@@ -243,15 +287,21 @@ gh api graphql -f query='
         }
       }
     }
-  }' -F owner=$OWNER -F repo=$REPO -F pr=$PR_NUMBER
+  }' -F owner=$OWNER -F repo=$REPO -F pr=$PR_NUMBER -F cursor=$CURSOR
 ```
+
+Drive a loop in the executing agent: start with `CURSOR=null`, accumulate `nodes`, then re-run with `CURSOR=<endCursor>` until `hasNextPage` is `false`. As a safety check, if a single page returns `length(nodes) >= 100` and pagination has not yet been implemented end-to-end (e.g. dry-run mode), emit a one-line warning to the user that the page cap was hit so a missed thread is visible rather than silent.
 
 **Strict mapping rule** (replaces vibes-based "the change must plausibly answer the comment"):
 
 A thread is eligible for resolution iff **all** of the following hold:
 
 1. The thread's `path` appears in `git diff --name-only $PUSHED_SHA^..$PUSHED_SHA` (i.e. the just-pushed commit modified that file).
-2. The just-pushed commit's diff modifies at least one line in `$thread.path` within the range `[ (originalStartLine ?? originalLine) - 5, originalLine + 5 ]` (i.e. within ±5 lines of the comment's anchor). Use `originalLine` / `originalStartLine` (the line in the version reviewed), not `line` (which may have shifted).
+2. The just-pushed commit's diff modifies at least one line in `$thread.path` within the range `[ (startLine ?? line) - 5, line + 5 ]` (i.e. within ±5 lines of the comment's **current-coordinate** anchor on the latest commit).
+
+   **Coordinate space.** `git diff $PUSHED_SHA^..$PUSHED_SHA` produces line numbers in current (post-edit) coordinate space. GitHub's `line` / `startLine` fields on a `PullRequestReviewThread` are also in current coordinate space — anchored to the latest commit on the PR. The `originalLine` / `originalStartLine` fields are anchored to the commit the review was originally posted against (pre-edit space). Comparing a current-coordinate diff against pre-edit anchors is wrong and drifts after every push.
+
+   Use `line` / `startLine` for the comparison. Fall back to `originalLine` / `originalStartLine` ONLY when `line` is null (which can happen when GitHub has not yet recomputed the anchor — rare but possible immediately after a push). The fallback is best-effort; if both are null, leave the thread unresolved.
 
 Threads that do not satisfy both conditions stay unresolved. **On uncertainty, leave unresolved** and let copilot decide on re-review.
 
@@ -284,9 +334,13 @@ This re-triggers a fresh copilot review against the just-pushed HEAD. **Error-ha
 
 Poll the PR every `60s` for a copilot review **attached to the commit pushed in step 4** (`$PUSHED_SHA`), not just any review submitted after `$PUSH_TS`. Cap polling at `60 minutes` per round.
 
-**Bot login discovery (do once, reuse across rounds):** the copilot bot's `login` is not a fixed string. On round 1, query the existing reviews and capture the login of the first review whose author looks like a copilot bot (case-insensitive `startswith("copilot")` or matches regex `(?i)copilot`). Stash this as `COPILOT_LOGIN`. Reuse it on subsequent rounds. If round 1 has no prior copilot review and `COPILOT_LOGIN` is not yet known, fall back to matching any author whose login satisfies `(.author.login | ascii_downcase | startswith("copilot"))` until a concrete login is observed.
+**Bot login discovery (do once, reuse across rounds):** the copilot bot's `login` is not a fixed string. To avoid false positives on user accounts whose login happens to start with `copilot` (e.g. `copilotAdvocate`), the bot filter requires BOTH `author.__typename == "Bot"` AND `(author.login | ascii_downcase | startswith("copilot"))`.
 
-Polling query:
+On round 1, query the existing reviews and capture the login of the first review whose author satisfies that combined filter. Stash this as `COPILOT_LOGIN`. Reuse it on subsequent rounds.
+
+If round 1 has no prior copilot review, **explicitly initialize `COPILOT_LOGIN=""`** before entering the polling loop. While `COPILOT_LOGIN` is empty, the polling filter relies entirely on the `__typename == "Bot"` AND login-prefix filter (the equality clause `author.login == $login` is dead-weight when `$login` is empty and is intentionally OR'd with the bot filter so polling still works). Once the first copilot review is observed in any round, capture its login into `COPILOT_LOGIN` and reuse on later rounds.
+
+Polling query — note the jq filter is a single shell-interpolated expression (passed as a single argument to `--jq`); `--arg` is not a flag accepted by `gh`'s `--jq`, so the shell variables `$PUSHED_SHA` and `$COPILOT_LOGIN` are interpolated into the jq filter string with proper escaping of the inner double-quotes:
 
 ```bash
 gh api graphql -f query='
@@ -296,7 +350,7 @@ gh api graphql -f query='
         reviews(last:50) {
           nodes {
             id
-            author { login }
+            author { __typename login }
             state
             submittedAt
             commit { oid }
@@ -306,17 +360,22 @@ gh api graphql -f query='
       }
     }
   }' -F owner=$OWNER -F repo=$REPO -F pr=$PR_NUMBER \
-  --jq --arg sha "$PUSHED_SHA" --arg login "$COPILOT_LOGIN" '
+  --jq "
     .data.repository.pullRequest.reviews.nodes
     | map(select(
-        ((.author.login | ascii_downcase | startswith("copilot"))
-         or (.author.login == $login))
-        and .commit.oid == $sha
+        (
+          (.author.__typename == \"Bot\" and (.author.login | ascii_downcase | startswith(\"copilot\")))
+          or (.author.login == \"$COPILOT_LOGIN\" and \"$COPILOT_LOGIN\" != \"\")
+        )
+        and (((.commit.oid // \"\") == \"$PUSHED_SHA\") or (.submittedAt > \"$PUSH_TS\"))
       ))
-    | sort_by(.submittedAt) | last'
+    | sort_by(.submittedAt) | last
+  "
 ```
 
-A round is complete when a copilot review for the just-pushed `$PUSHED_SHA` is observed. **Filter by `commit.oid == $PUSHED_SHA`**, not by `submittedAt > $PUSH_TS` — a delayed previous-round review can satisfy a timestamp filter and falsely terminate the round; the commit OID can't.
+If you prefer not to interpolate inside a quoted jq filter, the alternative is to fetch the raw JSON without `--jq` and pipe through a separate `jq --arg sha "$PUSHED_SHA" --arg login "$COPILOT_LOGIN" '...'` invocation — both are correct; pick one and stick to it.
+
+A round is complete when a copilot review for the just-pushed `$PUSHED_SHA` is observed. **Filter on `commit.oid == $PUSHED_SHA`** — but `commit.oid` can be `null` for some bot review paths, so coalesce to empty string (`(.commit.oid // "") == $sha`) before comparing, and additionally accept reviews with `submittedAt > $PUSH_TS` as a defense-in-depth fallback. This dual-criterion is intentional: the OID filter is the primary signal, and the timestamp filter catches review-types where GitHub does not populate `commit.oid` for bots. A delayed previous-round review submitted before `$PUSH_TS` is excluded by the timestamp half; a same-round review with `commit.oid` populated is caught by the OID half.
 
 If the 60-min cap trips before that happens, bail to the user with: "copilot reviewer was silent past the 60-min cap on round N; manual follow-up required". Do not push anything else in that case.
 

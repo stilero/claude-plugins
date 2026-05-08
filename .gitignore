@@ -418,9 +418,11 @@ FodyWeavers.xsd
 *.msp
 
 # agent-harness working artifacts (kept on disk for resume; not part of PR diffs)
-PLAN.md
-TASK.md
-.harness-state.md
-.harness-aborted.md
-.harness-grill-transcript.md
+# Anchored to repo root so plugin docs that legitimately need a PLAN.md / TASK.md
+# (e.g. plugins/<name>/PLAN.md) are not silently ignored.
+/PLAN.md
+/TASK.md
+/.harness-state.md
+/.harness-aborted.md
+/.harness-grill-transcript.md
 

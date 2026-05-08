@@ -43,6 +43,8 @@ You can also invoke it explicitly via the companion slash command `/fix-pr-comme
 
 Once your PR has copilot review comments, run the slash command `/fix-pr-comments-loop` (or ask the agent to "drive this PR to a clean review"). The loop will fetch unresolved threads, dispatch the fix step to `pr-comment-fixer`, harden the diff with `hardcore-code-reviewer`, run the host repo's resolved verification command (see "Verification command" below), push, resolve only the threads it actually addressed, re-request `@copilot` review via `gh pr edit --add-reviewer @copilot`, and poll every 60s for the next round — repeating until the PR is review-clean or the configured caps (3 inner hardcore iterations, 2 verification retries per round, 8 outer loop rounds, 60-minute per-round poll) trip and it bails to you with a status summary.
 
+> See `skills/fix-pr-comments-loop/SKILL.md` for the canonical default cap values; this README only states the conceptual loop. If the two ever drift, SKILL.md wins.
+
 ## Verification command
 
 The skill does **not** hardcode a verification command. It resolves one at runtime in this priority order:
@@ -62,8 +64,10 @@ This is a reproducible recipe for verifying the `fix-pr-comments-loop` skill end
 1. Create a throwaway branch off `main`: `git checkout -b smoke/fix-pr-comments-loop`.
 2. Commit a small diff that contains **at least two distinct defects** — one that copilot will flag, and one that `hardcore-code-reviewer` will flag. A reliable combination:
    - **Missing await** on an async call (copilot reliably flags this; e.g. `const user = fetchUser(id);` where `fetchUser` returns a Promise and the next line uses `user.name`).
-   - **Hardcoded secret** as a string literal (e.g. `const API_KEY = "FAKE_PLACEHOLDER_REPLACE_ME";`). `hardcore-code-reviewer`'s security subagent will flag this as BLOCKING. Use an obviously-fake placeholder so GitHub's secret scanner does not trip on the demo PR.
+   - **Hardcoded sleep / blocking call** in request-path code (e.g. `await new Promise(r => setTimeout(r, 5000)); // hardcoded 5s sleep`). `hardcore-code-reviewer`'s performance/security subagents will flag this as a perf issue without tripping any secret scanner.
    - Optional third defect for extra signal: an **unhandled error** path (a `JSON.parse(input)` with no `try`/`catch` inside a request handler). The `error-handling` and `silent-failure-hunter` reviewers will flag it.
+
+> If you really want to test the secret-scanner path, use a real-shaped fake (e.g. a 32-char hex string) — but be aware GitHub's push protection may block the test push. If push protection blocks, follow the dashboard URL the error provides to "Allow secret" for the smoke-test PR only, then re-run.
 3. Push the branch and open a PR: `gh pr create --fill --draft`.
 4. Add `@copilot` as a reviewer so it produces an initial review: `gh pr edit --add-reviewer @copilot` and wait for copilot to leave at least one review comment on the diff (usually 1–3 minutes).
 
