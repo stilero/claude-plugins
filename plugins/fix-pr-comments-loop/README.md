@@ -42,3 +42,53 @@ You can also invoke it explicitly via the companion slash command `/fix-pr-comme
 ## Usage
 
 Once your PR has copilot review comments, run the slash command `/fix-pr-comments-loop` (or ask the agent to "drive this PR to a clean review"). The loop will fetch unresolved threads, dispatch the fix step to `pr-comment-fixer`, harden the diff with `hardcore-code-reviewer`, run `yarn build && yarn test:unit && yarn test:integration && yarn lint`, push, resolve only the threads it actually addressed, re-request `@copilot` review via `gh pr edit --add-reviewer @copilot`, and poll every 60s for the next round — repeating until the PR is review-clean or the configured caps (3 inner hardcore iterations, 8 outer loop rounds, 60-minute per-round poll) trip and it bails to you with a status summary.
+
+## Manual smoke test
+
+This is a reproducible recipe for verifying the `fix-pr-comments-loop` skill end-to-end against a throwaway PR. Run it any time you change the skill's behavior, or before you trust the loop on a real PR.
+
+### (a) Set up a deliberately-buggy PR
+
+1. Create a throwaway branch off `main`: `git checkout -b smoke/fix-pr-comments-loop`.
+2. Commit a small diff that contains **at least two distinct defects** — one that copilot will flag, and one that `hardcore-code-reviewer` will flag. A reliable combination:
+   - **Missing await** on an async call (copilot reliably flags this; e.g. `const user = fetchUser(id);` where `fetchUser` returns a Promise and the next line uses `user.name`).
+   - **Hardcoded secret** as a string literal (e.g. `const API_KEY = "sk-live-abc123def456";`). `hardcore-code-reviewer`'s security subagent will flag this as BLOCKING.
+   - Optional third defect for extra signal: an **unhandled error** path (a `JSON.parse(input)` with no `try`/`catch` inside a request handler). The `error-handling` and `silent-failure-hunter` reviewers will flag it.
+3. Push the branch and open a PR: `gh pr create --fill --draft`.
+4. Add `@copilot` as a reviewer so it produces an initial review: `gh pr edit --add-reviewer @copilot` and wait for copilot to leave at least one review comment on the diff (usually 1–3 minutes).
+
+### (b) Invoke the skill
+
+From the PR's branch checkout, invoke the loop. Either of these is sufficient:
+
+- Slash command: `/fix-pr-comments-loop`
+- Natural-language phrase: ask the agent to **"drive this PR to a clean review"** (or any of the documented trigger phrases such as `address all PR comments and re-request review until clean`).
+
+### (c) Expected observable signals at each loop stage
+
+Watch for each of the following — all of them must be visible in the agent's tool-call/output stream for the run to count as a pass:
+
+1. **Fix step runs and touches files.** The agent invokes the `pr-comment-fixer` skill (`pr-comment-fixer:fix-issues`); you should see it report which files it edited in response to the unresolved review threads.
+2. **Inner hardening loop reaches a clean report.** The agent invokes `hardcore-code-reviewer` and iterates until the final report shows **0 BLOCKING and 0 IMPORTANT** findings (the `BLOCKING` count must reach zero before the loop is allowed to push). Capped at 3 inner iterations per outer round.
+3. **Verification command exits 0.** Before pushing, the agent runs `yarn build && yarn test:unit && yarn test:integration && yarn lint`; the combined exit code must be `0`. A non-zero exit blocks the push.
+4. **Push lands.** `git push` completes successfully and the new commit SHA appears on the PR.
+5. **Threads resolved via `resolveReviewThread`.** The agent issues `gh api graphql` calls invoking the `resolveReviewThread` mutation, **only for threads that were actually addressed by the just-pushed commit** (other threads stay unresolved).
+6. **Copilot re-requested.** `gh pr edit --add-reviewer @copilot` succeeds (no error from `gh`) and the PR's reviewer list shows `@copilot` re-requested.
+7. **Copilot re-review returns with zero new comments.** After the agent polls (every 60s, up to 60 minutes), copilot's next review submission has **zero new comments** (equivalently: no new unresolved threads). This is the success terminator for the outer loop.
+8. **Skill exits with a clean status.** The agent prints a final status summary indicating success — no caps tripped, all threads resolved, copilot returned with no new comments.
+
+### (d) Pass / fail criteria
+
+**PASS:** All eight signals above are observed within the configured caps (≤ 3 inner hardcore iterations per round, ≤ 8 outer rounds, ≤ 60 minutes of copilot polling per round). The PR ends with: every original unresolved thread either resolved or explicitly escalated to the user; `hardcore-code-reviewer` final report at 0 BLOCKING / 0 IMPORTANT; verification command green on the pushed commit; copilot re-review submitted with zero new comments (or `no new comments`).
+
+**FAIL:** Any of the following:
+
+- The fix step does not invoke `pr-comment-fixer` (the loop is reimplementing comment-fixing inline).
+- `hardcore-code-reviewer` final report still has `BLOCKING` or `IMPORTANT` findings when the loop pushes.
+- The loop pushes without `yarn build && yarn test:unit && yarn test:integration && yarn lint` having exited 0.
+- A review thread is resolved that was **not** addressed by the just-pushed commit (false-positive resolution — this is a hard fail even if everything else looks green).
+- `gh pr edit --add-reviewer @copilot` is not invoked, or invoked with the wrong reviewer.
+- An outer or inner cap trips and the agent silently retries instead of bailing to the user with a status summary.
+- Copilot returns a non-empty re-review and the loop exits as if clean.
+
+If any FAIL signal is observed, the smoke test fails and the skill must be fixed before the loop is used on a real PR.
