@@ -1,6 +1,6 @@
 ---
 task: PRODUKT-1384
-planner_rounds: 1
+planner_rounds: 2
 approved_by:
 ---
 
@@ -22,6 +22,7 @@ Add a new Claude Code plugin (`fix-pr-comments-loop`) to the `stilero-tools` mar
 - [ ] Skill fails fast with a clear message when no open PR exists for the current branch.
 - [ ] An optional companion slash command `commands/fix-pr-comments-loop.md` exists that loads the skill and accepts an optional PR number argument (mirrors `pr-comment-fixer/commands/fix-issue.md` shape).
 - [ ] Plugin `README.md` added at `plugins/fix-pr-comments-loop/README.md` with a usage example and a plain-English description of the loop, mirroring the style of `plugins/pr-comment-fixer/README.md`.
+- [ ] `README.md` (or `SKILL.md`) contains a clearly-headed `Manual smoke test` section that gives a reproducible recipe for verifying the skill end-to-end: open a throwaway PR with a deliberately-buggy diff (at least one issue copilot will flag and one issue hardcore-reviewer will flag), invoke the skill, and observe the documented success signals (clean hardcore report, verification passes, threads resolved, copilot re-review submitted with zero new comments, loop exits). The section names the exact pass/fail signals so a human can run the smoke test and judge the result without ambiguity.
 - [ ] `.claude-plugin/marketplace.json` at the repo root contains a new entry for `fix-pr-comments-loop` (name, source path, description, version `1.0.0`, author) — without this the plugin is invisible to users (per `CLAUDE.md`).
 - [ ] `jq empty .claude-plugin/marketplace.json` and `jq empty plugins/fix-pr-comments-loop/.claude-plugin/plugin.json` both exit 0 (valid JSON).
 - [ ] Skill frontmatter parses as valid YAML (no unbalanced quotes, single `description` key).
@@ -75,7 +76,20 @@ Add a new Claude Code plugin (`fix-pr-comments-loop`) to the `stilero-tools` mar
 
 ---
 
-### Step 5: Register the plugin in the marketplace manifest
+### Step 5: Document the manual smoke-test procedure in the README
+**Goal:** Address the `Manual smoke test` acceptance criterion by adding a `## Manual smoke test` section to `plugins/fix-pr-comments-loop/README.md` with a reproducible recipe a human can follow on a throwaway PR. The section must spell out: (a) how to set up the buggy PR (at least one defect copilot will flag and one defect `hardcore-code-reviewer` will flag — for example a missing `await`, a hardcoded secret, or an unhandled error path); (b) the exact command/phrase used to invoke the skill; (c) the expected observable signals at each loop stage (fix step touched files, hardcore report reaches 0 BLOCKING/IMPORTANT, verification command exits 0, push lands, threads resolved via `resolveReviewThread`, `gh pr edit --add-reviewer @copilot` succeeds, copilot re-review returns with zero new comments, skill exits with a clean status); and (d) the explicit pass/fail criteria. This makes the smoke test something the implementer (and any future user) can actually run and judge — the task's acceptance criterion becomes demonstrably addressed.
+**Files expected to change:**
+- `plugins/fix-pr-comments-loop/README.md` (modify — append section; file is created in Step 4)
+
+**Verification:**
+- `grep -q -i '^##.*manual smoke test' plugins/fix-pr-comments-loop/README.md` exits 0 (heading is present).
+- The smoke-test section names every loop-stage signal (one `grep -q` per term, all must pass): `pr-comment-fixer`, `hardcore-code-reviewer`, `BLOCKING`, `yarn build`, `resolveReviewThread`, `--add-reviewer @copilot`, `zero new comments` (or equivalent phrase such as `no new comments`).
+- The section explicitly states a pass criterion (e.g. "PASS:" / "Success:") and a fail criterion (e.g. "FAIL:" / "Failure:") — `grep -E -i -q '(^|[^a-z])(pass|success)[: ]' plugins/fix-pr-comments-loop/README.md` AND `grep -E -i -q '(^|[^a-z])(fail|failure)[: ]' plugins/fix-pr-comments-loop/README.md` both exit 0.
+- The recipe references at least one concrete buggy-diff example (e.g. `missing await`, `hardcoded secret`, `unhandled error`) — `grep -E -i -q 'missing await|hardcoded secret|unhandled error|deliberately[ -]buggy' plugins/fix-pr-comments-loop/README.md` exits 0.
+
+---
+
+### Step 6: Register the plugin in the marketplace manifest
 **Goal:** Append a new object to the `plugins` array in `.claude-plugin/marketplace.json` so the plugin is discoverable via `/plugin install`. Per `CLAUDE.md`: "Without an entry here, the plugin exists in the repo but is invisible to users."
 **Files expected to change:**
 - `.claude-plugin/marketplace.json` (modify — append one entry)
@@ -87,13 +101,14 @@ Add a new Claude Code plugin (`fix-pr-comments-loop`) to the `stilero-tools` mar
 
 ---
 
-### Step 6: End-to-end consistency sweep
-**Goal:** Cross-check that every acceptance criterion has a corresponding artifact and that the plugin matches the conventions enforced by `CLAUDE.md` (manifest under `.claude-plugin/`, semver version, marketplace entry present, skill frontmatter has the trigger phrases). No code changes expected — fix any drift discovered.
+### Step 7: End-to-end consistency sweep
+**Goal:** Cross-check that every acceptance criterion has a corresponding artifact and that the plugin matches the conventions enforced by `CLAUDE.md` (manifest under `.claude-plugin/`, semver version, marketplace entry present, skill frontmatter has the trigger phrases, smoke-test section present in README). No code changes expected — fix any drift discovered.
 **Files expected to change:**
-- Any of the files from steps 1–5 if drift is found; otherwise none.
+- Any of the files from steps 1–6 if drift is found; otherwise none.
 
 **Verification:**
 - All previous step verifications still pass when re-run.
 - `grep -q "fix-pr-comments loop" plugins/fix-pr-comments-loop/skills/fix-pr-comments-loop/SKILL.md` AND `grep -q "re-request review" plugins/fix-pr-comments-loop/skills/fix-pr-comments-loop/SKILL.md` (the two mandatory trigger phrases from acceptance criteria) both exit 0.
+- `grep -q -i '^##.*manual smoke test' plugins/fix-pr-comments-loop/README.md` still exits 0 (smoke-test section preserved).
 - Directory tree matches the `CLAUDE.md` plugin convention: `find plugins/fix-pr-comments-loop -type f` lists exactly the manifest, the SKILL.md, the command, and the README (no stray files).
 - `git status --short` shows only the expected new/modified paths (the new plugin tree plus the modified `marketplace.json`); nothing outside `plugins/fix-pr-comments-loop/` and `.claude-plugin/marketplace.json` is touched.
