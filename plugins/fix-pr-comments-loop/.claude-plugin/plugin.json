@@ -6,7 +6,7 @@
     "name": "Daniel Eliasson"
   },
   "license": "MIT",
-  "homepage": "https://eliasson.tech/",
+  "homepage": "https://github.com/stilero/claude-plugins/tree/main/plugins/fix-pr-comments-loop",
   "keywords": [
     "pr",
     "review",

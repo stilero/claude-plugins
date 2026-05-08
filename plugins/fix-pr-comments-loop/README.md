@@ -1,18 +1,18 @@
 # Fix PR Comments Loop
 
-Autonomous loop that drives a pull request to a clean review state. Fetches unresolved review threads, fixes them via the `pr-comment-fixer` skill, hardens the resulting diff via the `hardcore-code-reviewer` skill, runs the project verification sequence, pushes, resolves the addressed threads, re-requests copilot review, polls for the next round, and repeats until the PR is review-clean or hard caps trip.
+Autonomous loop that fetches unresolved PR review threads, fixes them via pr-comment-fixer, hardens the diff via hardcore-code-reviewer, runs the host repo's resolved verification sequence, pushes, resolves threads, re-requests copilot review, and repeats until the PR is review-clean or hard caps trip.
 
 ## Features
 
-- **Fetch unresolved threads**: Reads open `reviewThreads` for the current PR via `gh api graphql`.
+- **Fetch unresolved threads**: Reads open `reviewThreads` for the current PR via `gh api graphql` with paginated cursor handling.
 - **Fix step**: Delegates to the existing `pr-comment-fixer:fix-issues` skill — does not re-implement comment fixing.
 - **Inner hardening loop**: Delegates to `hardcore-code-reviewer:hardcore-code-reviewer` and iterates fixes until the report is clean (capped, default 3 inner iterations).
-- **Verification gating**: Resolves the host repo's verification command (env override → skill arg → `CLAUDE.md` declaration → auto-detected from `package.json`/`pyproject.toml`/`Makefile` → no-op fallback with a warning) and runs it before every push; failure blocks the push.
-- **Thread resolution**: Resolves only the threads that were actually addressed by code in the just-pushed commit, via the `resolveReviewThread` GraphQL mutation.
-- **Re-request copilot**: Calls `gh pr edit --add-reviewer @copilot` to trigger the next round of review.
+- **Verification gating**: Resolves the host repo's verification command (env override → skill arg → `CLAUDE.md` declaration → auto-detected from `package.json`/`pyproject.toml`/`Makefile` → no-op fallback with a warning) and runs it before every push; failure blocks the push and re-enters the inner hardcore loop.
+- **Thread resolution**: Resolves only the threads that were actually addressed by code in the just-pushed commit (within a configurable line-window of the comment anchor), via the `resolveReviewThread` GraphQL mutation.
+- **Re-request copilot**: Calls `gh pr edit "$PR_NUMBER" --add-reviewer "$COPILOT_REVIEWER"` to trigger the next round of review. The reviewer login defaults to `copilot-pull-request-reviewer` and is overridable via the `FIX_PR_COMMENTS_LOOP_REVIEWER` environment variable.
 - **Bounded polling**: Polls every 60s for new copilot activity, with a per-round timeout (default 60 minutes).
 - **Hard caps**: Outer loop is capped (default 8 rounds); on cap exhaustion the skill bails to the user with a status summary instead of pushing more.
-- **Complexity bail-outs**: Escalates to the user instead of auto-applying when a fix would require multi-file refactors, test removal, or a public-API change.
+- **Complexity bail-outs**: Escalates to the user instead of auto-applying when a fix would require multi-file refactors (default 3 unrelated files; configurable via `FIX_PR_COMMENTS_LOOP_COMPLEXITY_THRESHOLD`), test removal, or a public-API change. The threshold check applies to the union of `pr-comment-fixer` and inner-loop edits.
 - **Fast fail**: Errors out clearly when no open PR exists for the current branch.
 
 ## Skills
@@ -23,7 +23,7 @@ This plugin contains the following skill:
 
 ## Prerequisites
 
-- **GitHub CLI (`gh`) ≥ 2.88**, authenticated against the repo. Required for `gh pr view`, `gh api graphql` (used for the `reviewThreads` query and `resolveReviewThread` mutation), and `gh pr edit --add-reviewer @copilot`.
+- **GitHub CLI (`gh`) ≥ 2.88**, authenticated against the repo. Required for `gh pr view`, `gh repo view`, `gh api graphql` (used for the `reviewThreads` query and `resolveReviewThread` mutation), and `gh pr edit --add-reviewer "$COPILOT_REVIEWER"` (the bare bot login, e.g. `copilot-pull-request-reviewer` — not `@copilot`).
 - **An open PR for the current branch.** The skill fails fast if there is none.
 - **The `pr-comment-fixer` plugin installed.** The loop delegates the fix step to its `fix-issues` skill rather than re-implementing comment-fixing logic.
 - **The `hardcore-code-reviewer` plugin installed.** The loop delegates the inner hardening step to its `hardcore-code-reviewer` skill.
@@ -41,7 +41,7 @@ You can also invoke it explicitly via the companion slash command `/fix-pr-comme
 
 ## Usage
 
-Once your PR has copilot review comments, run the slash command `/fix-pr-comments-loop` (or ask the agent to "drive this PR to a clean review"). The loop will fetch unresolved threads, dispatch the fix step to `pr-comment-fixer`, harden the diff with `hardcore-code-reviewer`, run the host repo's resolved verification command (see "Verification command" below), push, resolve only the threads it actually addressed, re-request `@copilot` review via `gh pr edit --add-reviewer @copilot`, and poll every 60s for the next round — repeating until the PR is review-clean or the configured caps (3 inner hardcore iterations, 2 verification retries per round, 8 outer loop rounds, 60-minute per-round poll) trip and it bails to you with a status summary.
+Once your PR has copilot review comments, run the slash command `/fix-pr-comments-loop` (or ask the agent to "drive this PR to a clean review"). The loop will fetch unresolved threads, dispatch the fix step to `pr-comment-fixer`, harden the diff with `hardcore-code-reviewer`, run the host repo's resolved verification command (see "Verification command" below), push, resolve only the threads it actually addressed, re-request the copilot reviewer via `gh pr edit "$PR_NUMBER" --add-reviewer "$COPILOT_REVIEWER"`, and poll every 60s for the next round — repeating until the PR is review-clean or the configured caps (3 inner hardcore iterations per round, 8 outer loop rounds, 60-minute per-round poll) trip and it bails to you with a status summary. Verification failures (and pre-commit hook failures) re-enter the inner hardcore loop and consume an inner-iteration budget — there is no longer a separate verification-retry budget.
 
 > See `skills/fix-pr-comments-loop/SKILL.md` for the canonical default cap values; this README only states the conceptual loop. If the two ever drift, SKILL.md wins.
 
@@ -69,7 +69,7 @@ This is a reproducible recipe for verifying the `fix-pr-comments-loop` skill end
 
 > If you really want to test the secret-scanner path, use a real-shaped fake (e.g. a 32-char hex string) — but be aware GitHub's push protection may block the test push. If push protection blocks, follow the dashboard URL the error provides to "Allow secret" for the smoke-test PR only, then re-run.
 3. Push the branch and open a PR: `gh pr create --fill --draft`.
-4. Add `@copilot` as a reviewer so it produces an initial review: `gh pr edit --add-reviewer @copilot` and wait for copilot to leave at least one review comment on the diff (usually 1–3 minutes).
+4. Add the copilot reviewer (bare login, NOT `@copilot`) so it produces an initial review: `gh pr edit "$PR_NUMBER" --add-reviewer "${FIX_PR_COMMENTS_LOOP_REVIEWER:-copilot-pull-request-reviewer}"` and wait for copilot to leave at least one review comment on the diff (usually 1–3 minutes). Set `FIX_PR_COMMENTS_LOOP_REVIEWER` to the configured login if your repo's copilot reviewer has a different login (visible in `gh pr view --json reviewRequests`).
 
 ### (b) Invoke the skill
 
@@ -87,22 +87,26 @@ Watch for each of the following — all of them must be visible in the agent's t
 3. **Verification command exits 0.** Before pushing, the agent runs the host repo's **resolved** verification command (see "Verification command" above — env override, then `CLAUDE.md`, then auto-detect, then no-op fallback). The combined exit code must be `0`. A non-zero exit blocks the push. If the no-op fallback applies (markdown-only repo), the agent must log the `no verification command discovered` warning instead of pretending verification ran.
 4. **Push lands.** `git push` completes successfully and the new commit SHA appears on the PR.
 5. **Threads resolved via `resolveReviewThread`.** The agent issues `gh api graphql` calls invoking the `resolveReviewThread` mutation, **only for threads that were actually addressed by the just-pushed commit** (other threads stay unresolved).
-6. **Copilot re-requested.** `gh pr edit --add-reviewer @copilot` succeeds (no error from `gh`) and the PR's reviewer list shows `@copilot` re-requested.
+6. **Copilot re-requested.** `gh pr edit "$PR_NUMBER" --add-reviewer "$COPILOT_REVIEWER"` succeeds (no error from `gh`; or the pre-check determined the reviewer was already requested and skipped the edit) and the PR's reviewer list shows the configured copilot reviewer re-requested. The skill detects "already requested" structurally (via `gh pr view --json reviewRequests`), not by parsing stderr strings.
 7. **Copilot re-review returns with zero new comments.** After the agent polls (every 60s, up to 60 minutes), copilot's next review submission has **zero new comments** (equivalently: no new unresolved threads). This is the success terminator for the outer loop.
 8. **Skill exits with a clean status.** The agent prints a final status summary indicating success — no caps tripped, all threads resolved, copilot returned with no new comments.
 
-### (d) Pass / fail criteria
+### (d) Pass / fail / bail criteria
 
-**PASS:** All eight signals above are observed within the configured caps (≤ 3 inner hardcore iterations per round, ≤ 8 outer rounds, ≤ 60 minutes of copilot polling per round). The PR ends with: every original unresolved thread either resolved or explicitly escalated to the user; `hardcore-code-reviewer` final report at 0 BLOCKING / 0 IMPORTANT; verification command green on the pushed commit; copilot re-review submitted with zero new comments (or `no new comments`).
+The smoke test has three possible terminal states. Distinguishing them matters — bail-out is **expected behavior** on under-specified or over-ambitious diffs and is NOT a failure.
 
-**FAIL:** Any of the following:
+**PASS:** Clean exit with 0 BLOCKING. All eight signals above are observed within the configured caps (≤ 3 inner hardcore iterations per round, ≤ 8 outer rounds, ≤ 60 minutes of copilot polling per round). The PR ends with: every original unresolved thread either resolved or explicitly escalated to the user; `hardcore-code-reviewer` final report at 0 BLOCKING / 0 IMPORTANT; verification command green on the pushed commit; copilot re-review submitted with zero new comments (or `no new comments`).
+
+**BAIL:** A documented bail condition trips and the skill cleanly hands control back to the user with a status summary that names the cap or threshold that tripped — for example, the inner-iteration cap (`hardcore-reviewer could not reach 0 BLOCKING/IMPORTANT after N inner iterations`), the outer-round cap, the copilot-poll cap, the complexity threshold (e.g. `>3` files unrelated to the original comment file in `FIX_FILES ∪ INNER_FIX_FILES`), the rate-limit back-off cap, or the `gh pr edit` non-zero exit (stderr logged verbatim). This is **not a smoke-test failure** — it is the skill working as intended on a diff the loop cannot autonomously close. The smoke test BAIL state is recorded as a third outcome, separate from PASS and FAIL.
+
+**FAIL:** Unexpected silent success, false-positive resolution, or ignoring caps. Any of the following constitutes a failure:
 
 - The fix step does not invoke `pr-comment-fixer` (the loop is reimplementing comment-fixing inline).
 - `hardcore-code-reviewer` final report still has `BLOCKING` or `IMPORTANT` findings when the loop pushes.
 - The loop pushes without the resolved verification command having exited 0 (or, in the documented no-op fallback case, without having logged the warning that verification was skipped).
 - A review thread is resolved that was **not** addressed by the just-pushed commit (false-positive resolution — this is a hard fail even if everything else looks green).
-- `gh pr edit --add-reviewer @copilot` is not invoked, or invoked with the wrong reviewer.
-- An outer or inner cap trips and the agent silently retries instead of bailing to the user with a status summary.
+- `gh pr edit "$PR_NUMBER" --add-reviewer "$COPILOT_REVIEWER"` is not invoked when the reviewer was not already requested (or invoked with the wrong reviewer login, or with an `@`-prefixed handle).
+- An outer or inner cap trips and the agent silently retries instead of bailing to the user with a status summary (i.e. the BAIL state is suppressed and the loop keeps running).
 - Copilot returns a non-empty re-review and the loop exits as if clean.
 
-If any FAIL signal is observed, the smoke test fails and the skill must be fixed before the loop is used on a real PR.
+If any FAIL signal is observed, the smoke test fails and the skill must be fixed before the loop is used on a real PR. A BAIL is acceptable; only a PASS or FAIL count as definitive smoke-test outcomes for skill-readiness.
