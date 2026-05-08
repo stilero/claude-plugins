@@ -66,6 +66,15 @@
       "author": {
         "name": "Daniel Eliasson"
       }
+    },
+    {
+      "name": "fix-pr-comments-loop",
+      "source": "./plugins/fix-pr-comments-loop",
+      "description": "Autonomous loop that drives a PR to a clean review: fetches unresolved PR threads, fixes them via pr-comment-fixer, hardens the diff with hardcore-code-reviewer, runs verification, pushes, resolves threads, and re-requests copilot review until the PR is review-clean or hard caps trip.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Daniel Eliasson"
+      }
     }
   ]
 }
