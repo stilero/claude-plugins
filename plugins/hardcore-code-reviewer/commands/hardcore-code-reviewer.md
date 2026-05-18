@@ -1,5 +1,5 @@
 ---
-description: "Strict hardcore code review with 12 parallel subagents (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety)"
+description: "Strict hardcore code review with 13 parallel subagents (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety, doc/comment drift)"
 argument-hint: "[scope: uncommitted | staged | last N commits | PR number]"
 allowed-tools: ["Bash", "Glob", "Grep", "Read", "Agent", "AskUserQuestion", "EnterPlanMode"]
 ---
@@ -58,9 +58,9 @@ Before spawning subagents, quickly scan the diff to understand what's changing:
 
 This context helps you write better prompts for each subagent.
 
-## Step 3: Spawn 12 Review Subagents in Parallel
+## Step 3: Spawn 13 Review Subagents in Parallel
 
-Launch ALL 12 subagents in a SINGLE message using the Agent tool so they run in parallel. Each subagent gets the full diff (or relevant portions for very large diffs), instructions to read surrounding file context as needed, and their specialized review focus. For Agents 11 (Accessibility) and 12 (Type Safety), only spawn them if the diff contains relevant code (frontend/UI for accessibility, TypeScript for type safety).
+Launch ALL 13 subagents in a SINGLE message using the Agent tool so they run in parallel. Each subagent gets the full diff (or relevant portions for very large diffs), instructions to read surrounding file context as needed, and their specialized review focus. For Agents 11 (Accessibility), 12 (Type Safety), and 13 (Doc Drift), only spawn them if the diff contains relevant content (frontend/UI for accessibility, TypeScript for type safety, prose/comments/docs for doc drift).
 
 For very large diffs (>1000 lines), split files across subagents by relevance rather than giving every subagent the full diff.
 
@@ -151,6 +151,9 @@ Focus: Divs used for interactive elements instead of semantic HTML, missing ARIA
 ### Agent 12: Type Safety Reviewer (only if diff contains TypeScript or typed code)
 Focus: Unsafe `as` casts, `as any` to silence errors, non-null assertions on genuinely nullable values, new `any` in signatures, API responses used without runtime validation, missing type narrowing, optional properties that are always present, index signatures bypassing type checking. Ask: "Does the type system describe what actually happens at runtime?" When building your claim checklist, prioritize claims in the API / contract category that assert type-shape invariants (response type unchanged, no new `any`, narrowed unions).
 
+### Agent 13: Doc Drift Reviewer (only if diff contains prose changes — markdown files, JSDoc/TSDoc blocks, or multi-line comments)
+Focus: Prose-to-code drift. Markdown docs (knowledge/, docs/, ADRs, PLAN/RUNBOOK/lessons-learned, READMEs) claiming wrong function names / return types / boundary conditions / status codes; JSDoc/TSDoc describing `@throws` / `@returns` / log levels that the code contradicts; inline comments describing behavior the code no longer has; PR description claims contradicted by the diff (e.g. "handler unchanged" but diff modifies it); test-file header comments describing a TDD red phase that is now green or a pre-refactor design; technical claims about external tools/libraries that are factually wrong (e.g. "vi.clearAllMocks resets implementations", "CREATE INDEX takes ACCESS EXCLUSIVE"). **Refactor-aftermath sweep:** when the diff renames/changes a shared mechanism, grep the whole repo for the symbol and emit ONE coalesced finding listing all stale prose sites — not N duplicates. When building your claim checklist, prioritize claims in the doc / runbook and API / contract categories. Ask: "Does every prose claim around this code still match the implementation?"
+
 ## Step 4: Merge and Deduplicate
 
 Once all subagents complete:
@@ -183,7 +186,7 @@ Only output issues. No summaries. No praise.
 
 If there are no issues at a severity level, omit that section entirely. Issue numbers are sequential across all sections — do not restart numbering per section.
 
-If zero issues across all agents: "No issues found. The diff looks clean across all 12 review angles (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety)."
+If zero issues across all agents: "No issues found. The diff looks clean across all 13 review angles (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety, doc/comment drift)."
 
 ## Step 6: Fix Roadmap
 
