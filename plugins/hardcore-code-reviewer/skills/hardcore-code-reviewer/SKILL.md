@@ -1,6 +1,6 @@
 ---
 name: hardcore-code-reviewer
-description: "Strict hardcore code reviewer that spawns 12 parallel subagents to find bugs, security issues, silent failures, pattern violations, test gaps, performance problems, unnecessary complexity, observability gaps, API contract issues, data/migration risks, accessibility violations, and type safety issues in your changes. Use this skill whenever the user asks to review code, review a PR, review changes, check code quality, do a code review, find bugs in changes, or says 'review', 'code review', '/hardcore-code-review', '/review-code', 'check my code', 'what's wrong with this', 'find issues', 'review before merge'. Also trigger when the user mentions wanting a second pair of eyes, final check, or pre-merge review. Works on current branch vs main by default, but also supports reviewing uncommitted changes, staged changes, or any custom diff range."
+description: "Strict hardcore code reviewer that spawns 13 parallel subagents to find bugs, security issues, silent failures, pattern violations, test gaps, performance problems, unnecessary complexity, observability gaps, API contract issues, data/migration risks, accessibility violations, type safety issues, and doc/comment drift in your changes. Use this skill whenever the user asks to review code, review a PR, review changes, check code quality, do a code review, find bugs in changes, or says 'review', 'code review', '/hardcore-code-review', '/review-code', 'check my code', 'what's wrong with this', 'find issues', 'review before merge'. Also trigger when the user mentions wanting a second pair of eyes, final check, or pre-merge review. Works on current branch vs main by default, but also supports reviewing uncommitted changes, staged changes, or any custom diff range."
 ---
 
 # Hardcore Code Reviewer
@@ -9,7 +9,7 @@ You are a senior staff engineer performing a strict pull request review. Your jo
 
 ## How This Review Works
 
-This skill spawns 12 specialized subagents in parallel, each examining the same diff from a different angle. This catches issues that a single-pass review would miss — a security reviewer thinks differently than a performance reviewer, and both catch things the other wouldn't notice.
+This skill spawns 13 specialized subagents in parallel, each examining the same diff from a different angle. This catches issues that a single-pass review would miss — a security reviewer thinks differently than a performance reviewer, and both catch things the other wouldn't notice. The 13th angle (doc-drift) catches a class of issues invisible to the code-focused 12: prose in comments, docstrings, knowledge files, ADRs, PLAN/RUNBOOK docs, and PR descriptions that no longer matches the implementation it describes.
 
 After all subagents report back, you merge their findings into a single deduplicated report, ranked by severity.
 
@@ -105,6 +105,25 @@ For each helper/middleware/decorator/registrar called from any `+` line in the d
 
 This is the data the architecture-reviewer needs for sibling-propagation checks.
 
+### Prose claims (only if doc files, JSDoc/TSDoc blocks, or multi-line comments are touched)
+
+Doc-drift findings depend on enumerating every prose claim the diff makes or modifies. Most diffs have some prose; emit `(none)` if this diff genuinely has zero prose changes.
+
+- **Doc files changed**: every file under the "Documentation" file group from above (markdown, RST, ADRs, PLAN/TASK/RUNBOOK files, knowledge notes, READMEs, CHANGELOGs)
+- **JSDoc/TSDoc/docstring blocks changed**: any `/**...*/` block (TS/JS) or `"""..."""` block (Python) or `///` run (Rust) where the diff adds, modifies, or surrounds the block. Detect with `git diff <range> | grep -nE '^\+.*(\*\*|///|""")'` and walk the surrounding hunks
+- **Multi-line `//` or `#` comment hunks (≥ 2 lines)**: comments that make substantive claims — single-line comments are usually too short to drift
+- **Status markers in the diff**: `TODO`, `FIXME`, `WIP`, `XXX`, `@deprecated`, `@since`, "TDD red phase", "red bar", "WIP:" — grep them out so the doc-drift agent can verify they still apply: `git diff <range> | grep -nE '^\+.*(TODO|FIXME|WIP|XXX|@deprecated|@since|red phase|red bar)'`
+- **PR-description claims (if a PR body was fetched)**: extract any assertion of the form "this PR doesn't touch X", "X is unchanged", "field Y is exposed", "behavior preserved" — these are scope/contract claims the doc-drift agent will cross-check against the diff (and that reinforce the orchestrator's existing Scope-overrun check)
+- **Comment-only diff hunks**: hunks where every `+`/`-` line is inside a comment block (no executable change). These are pure prose edits and worth surfacing — they may have been updated *correctly* in this PR, in which case no finding, but they're the highest-density drift candidates
+
+### Refactor signals (only if any modified symbol has multiple call sites in the repo)
+
+Many doc-drift misses come from refactors: one mechanism's contract changes and 5–30 prose sites elsewhere still describe the old contract. To enable the coalescing rule in the doc-drift agent, enumerate these candidates:
+
+- For each symbol tagged **modified** in the "Symbols touched" category above, count its call sites: `grep -rnE '\b<symbolName>\b' . --include='*.ts' --include='*.js' --include='*.py' --include='*.go' --include='*.md' --include='*.mdx' --include='*.rst' | wc -l`
+- List any modified symbol with ≥ 5 total references in the repo as a **refactor signal**: `<symbolName> — N references across repo; declaration modified at <file:line>`
+- If a high-reference symbol has been *renamed* or *removed* (declaration deleted in diff and not re-added under the new name), tag it as **rename/remove** — these are the highest-priority sweep candidates
+
 ### Trust boundaries (only if request handlers, deserializers, or external API calls are touched)
 List every place in the diff where data crosses a trust boundary:
 - HTTP request handlers reading `req.body` / `req.query` / `req.params` / `req.headers`
@@ -131,19 +150,20 @@ List every place in the diff where data crosses a trust boundary:
 | data-migration-reviewer | Files (Migrations) + Schemas/DTOs files + raw SQL in diff |
 | accessibility-reviewer | Files (Frontend) only — skip the agent entirely if this is empty |
 | type-safety-reviewer | Symbols in typed-language files + diff-grep for `as`/`any`/`!`/non-null assertions |
+| doc-drift-reviewer | Prose claims (all subcategories) + Documentation files + Refactor signals — skip the agent entirely if Prose claims is `(none)` AND no doc file is in the diff |
 
 The slice is the *minimum* coverage; agents may also pattern-scan beyond it. The contract is: every item in the slice gets at least one inspection, and any item the agent skips must be justified in its output.
 
 ## Step 3: Spawn Review Subagents
 
-Launch ALL 12 subagents in a single message so they run in parallel. Each subagent gets:
+Launch ALL 13 subagents in a single message so they run in parallel (skipping any whose slice is empty per the per-agent slice table above — typically accessibility-reviewer when no frontend files change, type-safety-reviewer when no typed-language files change, and doc-drift-reviewer when no prose changes). Each subagent gets:
 1. The full diff (or relevant portions for very large diffs)
 2. Instructions to read surrounding file context as needed
 3. Their specialized review focus
 
 For very large diffs (>1000 lines), split files across subagents by relevance rather than giving every subagent the full diff. For example, the security reviewer doesn't need test file changes.
 
-**The 12 review angles:**
+**The 13 review angles:**
 
 ### Agent 1: Bug Hunter
 Focus: Logic errors, edge cases, correctness
@@ -225,6 +245,15 @@ Spawn with the `hardcore-code-reviewer:type-safety-reviewer` agent. Give it the 
 
 When building your claim checklist, prioritize claims in the API / contract category that assert type-shape invariants (response type unchanged, no new `any`, narrowed unions).
 
+### Agent 13: Doc Drift Reviewer
+Focus: Prose-to-code drift — markdown docs, JSDoc/TSDoc/docstrings, multi-line comments, PR description claims, and test-file header comments that no longer match the implementation
+
+Spawn with the `hardcore-code-reviewer:doc-drift-reviewer` agent. Give it the diff, the PR body, the `Prose claims` inventory slice, and the `Refactor signals` inventory category. Only spawn this agent if the `Prose claims` inventory is non-empty OR a Documentation file is in the diff.
+
+This agent does not review code correctness, API design, or test coverage — it only verifies that prose claims match the implementation they describe. When the diff is refactor-shaped (one or more entries in `Refactor signals` with ≥5 references), explicitly call this out in the prompt so the agent activates its coalescing rule and produces ONE finding listing all stale prose sites per renamed/changed mechanism, not many duplicates.
+
+When building your claim checklist, prioritize claims in the **doc / runbook** and **API / contract** categories — those are the categories where prose drift causes the most operational harm. The doc-drift reviewer is the reinforcing pass on the orchestrator's existing PR-claim and Scope-overrun checks, with deeper coverage of intra-diff prose (not just the PR body).
+
 **Prompt template for each subagent:**
 
 ```
@@ -264,6 +293,8 @@ In addition to your specialized lane below, run these three checks on every diff
 2. **Scope-overrun (inverse of the acceptance-criteria check above).** The acceptance-criteria pass verifies the PR's stated claims against the code. This check is the inverse: enumerate everything the diff *does* that the PR description and tests *don't mention*. Anything the diff does silently — beyond stated scope — is itself a finding, especially when the unstated behavior touches a public surface (HTTP responses, exported types, log lines, on-disk artifacts). Worked example: PR body says "forward 429 from the rate-limit plugin" but the diff forwards every Fastify 4xx including built-in 415s — the broader passthrough is the finding even though the stated scope works correctly. When the PR body is empty or template-only, treat that as license to flag any surprising or non-trivial behavior in the diff rather than a reason to skip this check.
 
 3. **Sibling propagation.** When the diff adds a behavior, schema, decorator, middleware, validation, or contract attachment to one consumer of a shared mechanism (a shared middleware, a rate-limit helper, an auth decorator, a logging utility, a route registrar, a serializer plugin), grep for every other consumer of the same mechanism and check whether the new behavior should propagate there too. Apply consistently across siblings, or flag the inconsistency. Worked example: `TooManyRequestsSchema` attached to one route group that uses `sensitiveRouteRateLimit()`; other routes using the same middleware leave Swagger inconsistent for the same shared rate-limit behavior — every untouched sibling is a finding.
+
+4. **Prose-to-code consistency.** Every prose claim the diff modifies — JSDoc/TSDoc blocks, multi-line `//` or `#` comments, markdown docs in `docs/`, `knowledge/`, ADRs, PLAN/RUNBOOK/lessons-learned, READMEs, test-file header comments — must still match the implementation. Cross-check named symbols (do they exist with the claimed signature?), boundary conditions (`==` vs `>=`, "exactly N" vs "at least N"), return-type claims, error semantics, status codes, sort-order documentation, and "intentionally does/does-not X" assertions. Also verify any factual claim the comment makes about external tools/libraries/runtimes (e.g., "vi.clearAllMocks resets implementations" — wrong; "CREATE INDEX takes ACCESS EXCLUSIVE" — wrong). The doc-drift-reviewer is the specialist for this lane, but when you spot drift in your own lane in passing, flag it. Coalesce findings: if the diff changed a mechanism and many sites still describe the old behavior, emit ONE finding listing all stale sites rather than N duplicates.
 
 For each check that surfaces a gap, emit a finding in your normal output format. Severity defaults: BLOCKING when the gap exposes wrong status codes, silent success on partial failure, or undocumented public-API behavior; IMPORTANT for documentation/Swagger inconsistency or contract drift; MINOR for stylistic propagation gaps. These checks are forcing functions, not optional — running them and finding nothing is a valid outcome, but skipping them is not.
 
@@ -335,7 +366,7 @@ If there are no issues at a severity level, omit that section entirely. Issue nu
 If there are zero issues across all agents, output:
 
 ```
-No issues found. The diff looks clean across all 12 review angles (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety).
+No issues found. The diff looks clean across all 13 review angles (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety, doc/comment drift).
 ```
 
 ## Step 6: Fix Roadmap
