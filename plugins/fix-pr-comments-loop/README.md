@@ -4,6 +4,7 @@ Autonomous loop that fetches unresolved PR review threads, fixes them via pr-com
 
 ## Features
 
+- **Per-round fresh context**: The loop dispatches each round to a fresh Agent-tool subagent. Hardcore-reviewer output, `pr-comment-fixer` diff logs, verification output, and copilot polling spam stay isolated inside the round's subagent — they do not accumulate in the orchestrator's context across rounds. The orchestrator only sees a compact JSON return (~500 bytes) per round plus its own dispatch lines. Tradeoff: the user does not see live per-step status streaming during a round; the round subagent's `[step K]` lines are buffered by the Agent tool and dumped at round completion. `tee fix-pr-comments-loop.log` still works for grep-friendly transcripts, just with per-round granularity instead of per-step.
 - **Fetch unresolved threads**: Reads open `reviewThreads` for the current PR via `gh api graphql` with paginated cursor handling.
 - **Fix step**: Delegates to the existing `pr-comment-fixer:fix-issues` skill — does not re-implement comment fixing.
 - **Inner hardening loop**: Delegates to `hardcore-code-reviewer:hardcore-code-reviewer` and iterates fixes until the report is clean (capped, default 3 inner iterations).
@@ -17,9 +18,10 @@ Autonomous loop that fetches unresolved PR review threads, fixes them via pr-com
 
 ## Skills
 
-This plugin contains the following skill:
+This plugin contains two skills that work together:
 
-- **fix-pr-comments-loop**: The autonomous loop that orchestrates fix → review → verify → push → resolve → re-request review → poll until clean.
+- **fix-pr-comments-loop** (orchestrator): The user-facing skill. Fail-fast preconditions, one-time setup (resolving the verification command and copilot reviewer login), the outer round-dispatch loop (one fresh subagent per round via the Agent tool), JSON-return parsing, outer-round cap enforcement, cumulative tally bookkeeping, and the final user-facing summary.
+- **fix-pr-comments-loop-round** (per-round executor): Invoked once per round by the orchestrator in a fresh Agent-tool subagent. Runs steps 0–8 of a single round (count unresolved threads, fix, harden, verify, push, resolve threads, re-request copilot, poll, decide) and returns a structured JSON result. Has a deliberately defensive description so it does NOT compete with the orchestrator for user-trigger matches — direct invocation is reserved for advanced debugging of a single round.
 
 ## Prerequisites
 
