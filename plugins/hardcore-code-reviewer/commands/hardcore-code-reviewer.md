@@ -1,6 +1,6 @@
 ---
 description: "Strict hardcore code review with 13 parallel subagents (bugs, security, architecture, tests, error handling, performance, complexity, observability, API contracts, data/migrations, accessibility, type safety, doc/comment drift)"
-argument-hint: "[scope: uncommitted | staged | last N commits | PR number]"
+argument-hint: "[--profile=fast|standard|paranoid] [scope: uncommitted | staged | last N commits | PR number]"
 allowed-tools: ["Bash", "Glob", "Grep", "Read", "Agent", "AskUserQuestion", "EnterPlanMode"]
 ---
 
@@ -8,7 +8,43 @@ allowed-tools: ["Bash", "Glob", "Grep", "Read", "Agent", "AskUserQuestion", "Ent
 
 You are a senior staff engineer performing a strict pull request review. Your job is NOT to help. Your job is to find problems.
 
-**Review scope (optional):** "$ARGUMENTS"
+**Arguments (optional, may include profile + scope):** "$ARGUMENTS"
+
+## Step 0: Profile Selection
+
+Before any other work, pick a **model profile** for this run. The profile controls which Claude model each subagent (and the orchestrator's synthesis pass) uses, trading review depth against cost.
+
+**Parsing the profile from `$ARGUMENTS`:**
+- Look for `--profile=fast`, `--profile=standard`, or `--profile=paranoid` (also accept bare `fast` / `standard` / `paranoid` and `--paranoid` style variants).
+- Synonyms — "cheap"/"quick" → `fast`, "deep"/"thorough"/"max"/"high-stakes" → `paranoid`.
+- If no profile token is present, **default to `standard`**.
+- Strip the profile token before treating the rest of `$ARGUMENTS` as the review scope.
+
+**Profile → model mapping** (these are the `model:` values you pass to the Agent tool per spawn; the override wins over the agent's frontmatter):
+
+| Agent | `fast` | `standard` (default) | `paranoid` |
+|---|---|---|---|
+| Bug Hunter | sonnet | sonnet | **opus** |
+| Silent Failure Hunter | sonnet | sonnet | **opus** |
+| Security Reviewer | sonnet | sonnet | **opus** |
+| Architecture Reviewer | sonnet | sonnet | sonnet |
+| Doc Drift Reviewer | sonnet | sonnet | sonnet |
+| API Contract Reviewer | sonnet | sonnet | sonnet |
+| Data & Migration Reviewer | sonnet | sonnet | sonnet |
+| Observability Reviewer | sonnet | sonnet | sonnet |
+| Test Coverage Reviewer | sonnet | sonnet | sonnet |
+| Performance Reviewer | **haiku** | sonnet | sonnet |
+| Complexity Reviewer | **haiku** | sonnet | sonnet |
+| Type Safety Reviewer | **haiku** | sonnet | sonnet |
+| Accessibility Reviewer | **haiku** | sonnet | sonnet |
+| Orchestrator (you) | sonnet | sonnet | **opus** |
+
+**Profile guidance:**
+- **`fast`** — routine PRs, internal tooling, small refactors. Drops 4 catalog-pattern lanes (performance, complexity, type-safety, accessibility) to Haiku. ~25–30% cheaper than `standard` with minimal quality loss on those well-defined catalogs.
+- **`standard`** (default) — everyday PRs. Every lane on Sonnet. The safe baseline.
+- **`paranoid`** — migration PRs, auth/payment changes, security-sensitive code. Upgrades the three highest-stakes lanes (bug-hunter, silent-failure-hunter, security-reviewer) and the orchestrator's synthesis pass to Opus. ~3–4x cost on those four; everything else stays Sonnet.
+
+**Announce the chosen profile** in your first user-facing line of output (e.g., `"Reviewing on profile=fast (4 lanes on Haiku, rest on Sonnet)."`). If you defaulted because nothing was specified, say so.
 
 ## Step 1: Determine the Diff
 
@@ -61,6 +97,8 @@ This context helps you write better prompts for each subagent.
 ## Step 3: Spawn 13 Review Subagents in Parallel
 
 Launch ALL 13 subagents in a SINGLE message using the Agent tool so they run in parallel. Each subagent gets the full diff (or relevant portions for very large diffs), instructions to read surrounding file context as needed, and their specialized review focus. For Agents 11 (Accessibility), 12 (Type Safety), and 13 (Doc Drift), only spawn them if the diff contains relevant content (frontend/UI for accessibility, TypeScript for type safety, prose/comments/docs for doc drift).
+
+**Per-spawn model override (mandatory):** when calling the Agent tool for each subagent, pass the `model:` parameter according to the profile selected in Step 0. The Agent tool's `model:` parameter overrides the agent's frontmatter, so this is the only place model selection happens at runtime. Do not omit it — silent fallback to the frontmatter's `sonnet` defeats the profile.
 
 For very large diffs (>1000 lines), split files across subagents by relevance rather than giving every subagent the full diff.
 
